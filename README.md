@@ -50,10 +50,20 @@ Open http://127.0.0.1:3000. If you forget `db:migrate`, the app tells you to run
 4. **Trades**: open a planned trade, close an open trade with an exit price, cancel a planned
    trade, or edit notes. Closed trades keep their prices locked; you can still add review notes.
 
+5. **Stats**: pick an account to see statistics for its closed trades, one section per currency
+   (win rate, net P&L, R-multiples, expectancy, profit factor, drawdown, breakdowns and an equity
+   curve table). Every number is explained in plain language in
+   [docs/stats-glossary.md](docs/stats-glossary.md). Set the account base currency to the currency
+   you actually trade in (USDT for `BTCUSDT`), otherwise you get no drawdown percentage. With fewer
+   than 30 closed trades the page warns you that the numbers are not reliable.
+
 Prices and amounts are stored as exact decimal text (no rounding errors). Times you type are
 your computer's local time and are stored as UTC.
 
 ## Database and migrations
+
+After pulling module 2, run `npm run db:migrate` once: it adds the frozen `initial_stop_loss` to your
+existing database and fills it for trades that are already open or closed.
 
 The database is a single file (`data/houcine-trades.db` by default, set by `DATABASE_URL`). It is
 gitignored and contains your trade data: never commit it. Until backups exist (module 8), copy
