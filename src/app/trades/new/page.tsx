@@ -20,6 +20,7 @@ export default guardedPage(async (ctx) => {
         <TradeForm
           action={createTradeAction}
           preview={previewRiskAction}
+          stepUpFresh={ctx.auth !== null}
           accounts={accounts}
           setups={setups}
           mode="create"

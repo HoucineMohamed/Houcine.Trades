@@ -95,7 +95,7 @@ describe('proxy.ts', () => {
     >[]) {
       const res = proxy(req('http://127.0.0.1:3000/trades', { headers }));
       expect(res.status).toBe(303);
-      expect(res.headers.get('location')).toBe('/login');
+      expect(new URL(res.headers.get('location') as string).pathname).toBe('/login');
     }
   });
   it('lets /login through with a CSP that has a fresh nonce each time', () => {

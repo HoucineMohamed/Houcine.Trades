@@ -143,6 +143,20 @@ export function publicAction<A extends unknown[], R>(
 }
 
 /**
+ * Like requireFreshAuth, but returns null instead of throwing when no code was typed and none is
+ * fresh. For actions that only sometimes need it (loosening a limit, using an override): the data
+ * layer then decides, and refuses with StepUpRequiredError when it really was needed. A code that
+ * was typed but is wrong is always an error.
+ */
+export function optionalFreshAuth(ctx: GuardContext, formData: FormData): FreshAuth | null {
+  const typed = formData.get('stepUpCode');
+  if (typeof typed === 'string' && typed.trim() !== '') {
+    return requireFreshAuth(ctx, formData, 'a fresh authenticator code');
+  }
+  return ctx.auth;
+}
+
+/**
  * Step-up for a sensitive action. Accepts a code typed in the form (field "stepUpCode") or a code
  * entered within the last 5 minutes. Throws StepUpRequiredError otherwise.
  */

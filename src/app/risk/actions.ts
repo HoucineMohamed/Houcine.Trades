@@ -8,7 +8,7 @@ import {
   updateRiskSettings,
 } from '@/data/risk';
 import { riskFieldLabel, type SettingsChangeResult } from '@/domain/risk';
-import { guardedAction } from '../_lib/guard-core';
+import { guardedAction, optionalFreshAuth, requireFreshAuth } from '../_lib/guard-core';
 import { errorMessages, formValues, toId } from '../_lib/form';
 
 const back = (accountId: number | undefined, kind: 'ok' | 'error', message: string) =>
@@ -41,14 +41,20 @@ export const updateSettingsAction = guardedAction(async (ctx, formData: FormData
   const accountId = toId(v.accountId);
   let target: string;
   try {
-    const result = updateRiskSettings(ctx.db, accountId ?? -1, {
-      maxRiskPerTradePercent: v.maxRiskPerTradePercent,
-      maxDailyLossPercent: v.maxDailyLossPercent,
-      maxOpenRiskPercent: v.maxOpenRiskPercent,
-      maxOpenTrades: toId(v.maxOpenTrades),
-      maxDrawdownPercent: v.maxDrawdownPercent,
-      minRewardToRisk: v.minRewardToRisk,
-    });
+    const result = updateRiskSettings(
+      ctx.db,
+      accountId ?? -1,
+      {
+        maxRiskPerTradePercent: v.maxRiskPerTradePercent,
+        maxDailyLossPercent: v.maxDailyLossPercent,
+        maxOpenRiskPercent: v.maxOpenRiskPercent,
+        maxOpenTrades: toId(v.maxOpenTrades),
+        maxDrawdownPercent: v.maxDrawdownPercent,
+        minRewardToRisk: v.minRewardToRisk,
+      },
+      // Loosening a limit needs a fresh code; tightening needs none (the data layer decides).
+      optionalFreshAuth(ctx, formData),
+    );
     target = back(accountId, 'ok', describe(result));
   } catch (error) {
     target = back(accountId, 'error', errorMessages(error).join(' | '));
@@ -80,7 +86,13 @@ export const resetAction = guardedAction(async (ctx, formData: FormData) => {
   const kind = v.haltKind === 'drawdown' ? 'drawdown' : 'manual';
   let target: string;
   try {
-    resetHalt(ctx.db, accountId ?? -1, kind, { confirm: v.confirm, reason: v.reason });
+    resetHalt(
+      ctx.db,
+      accountId ?? -1,
+      kind,
+      { confirm: v.confirm, reason: v.reason },
+      requireFreshAuth(ctx, formData, 'resetting a halt'),
+    );
     target = back(accountId, 'ok', `The ${kind} halt was reset and the reset was logged.`);
   } catch (error) {
     target = back(accountId, 'error', errorMessages(error).join(' | '));
@@ -94,10 +106,12 @@ export const restoreDefaultsAction = guardedAction(async (ctx, formData: FormDat
   const accountId = toId(v.accountId);
   let target: string;
   try {
-    restoreDefaultRiskSettings(ctx.db, accountId ?? -1, {
-      confirm: v.confirm,
-      reason: v.reason,
-    });
+    restoreDefaultRiskSettings(
+      ctx.db,
+      accountId ?? -1,
+      { confirm: v.confirm, reason: v.reason },
+      requireFreshAuth(ctx, formData, 'restoring the default risk settings'),
+    );
     target = back(
       accountId,
       'ok',

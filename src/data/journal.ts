@@ -6,6 +6,7 @@ import {
   type TradePlan,
   type Verdict,
 } from '@/domain/risk';
+import { assertFreshAuth, type FreshAuth } from '@/domain/auth/stepup';
 import * as lifecycle from '@/domain/trades/lifecycle';
 import type { RepoOptions } from './accounts';
 import type { Db, Reader, Writer } from './client';
@@ -43,6 +44,11 @@ export class RiskRefusalError extends Error {
 export interface JournalOptions extends RepoOptions {
   /** Typed confirmation + reason to log a plan the engine refused. */
   override?: { confirm?: string | null; reason?: string | null } | null;
+  /**
+   * Proof of a fresh authenticator code (step-up). REQUIRED whenever an override is actually
+   * used: logging a refused plan is a sensitive action. Not needed for approved plans.
+   */
+  auth?: FreshAuth | null;
 }
 
 export interface JournalResult {
@@ -119,7 +125,10 @@ function gate(
     });
     return { refused: verdict };
   }
-  return { verdict, context, overrideReason: validateOverride(args.options.override ?? {}).reason };
+  const { reason } = validateOverride(args.options.override ?? {});
+  // Thrown inside the transaction: nothing is written without the fresh code.
+  assertFreshAuth(args.options.auth, args.now, 'logging an override');
+  return { verdict, context, overrideReason: reason };
 }
 
 /** Logs a new trade (planned or already open) through the risk engine. */

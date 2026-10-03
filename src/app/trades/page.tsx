@@ -8,6 +8,7 @@ import { isHttpUrl } from '@/domain/fields';
 import type { TradeFilter } from '@/domain/trades/inputs';
 import { STATUSES, type Trade } from '@/domain/trades/types';
 import { guardedPage } from '../_lib/guard';
+import { StepUpField } from '../_lib/StepUpField';
 import { formatLocal, orUndefined, toId, utcToLocalInput } from '../_lib/form';
 import { cancelTradeAction, closeTradeAction, openTradeAction } from './actions';
 
@@ -19,7 +20,15 @@ interface SearchParams {
   account?: string;
 }
 
-function RowActions({ trade, nowLocal }: { trade: Trade; nowLocal: string }) {
+function RowActions({
+  trade,
+  nowLocal,
+  fresh,
+}: {
+  trade: Trade;
+  nowLocal: string;
+  fresh: boolean;
+}) {
   return (
     <>
       {trade.status !== 'cancelled' && <Link href={`/trades/${trade.id}/edit`}>Edit</Link>}
@@ -62,6 +71,7 @@ function RowActions({ trade, nowLocal }: { trade: Trade; nowLocal: string }) {
                   Reason <input name="overrideReason" size={40} autoComplete="off" />
                 </label>
               </p>
+              <StepUpField fresh={fresh} />
               <button type="submit">Mark as open</button>
             </form>
           </details>
@@ -232,7 +242,7 @@ export default guardedPage(
                       ))}
                   </td>
                   <td>
-                    <RowActions trade={t} nowLocal={nowLocal} />
+                    <RowActions trade={t} nowLocal={nowLocal} fresh={ctx.auth !== null} />
                   </td>
                 </tr>
               ))}

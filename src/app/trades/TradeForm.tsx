@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ASSET_CLASSES } from '@/domain/trades/types';
 import { emptyFormState, formValues, type FormState, type FormValues } from '../_lib/form';
+import { StepUpField } from '../_lib/StepUpField';
 import type { RiskPreview } from './actions';
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
   submitLabel: string;
   /** Create mode: asks the server for the live risk verdict of the plan (saves nothing). */
   preview?: (values: FormValues) => Promise<RiskPreview>;
+  /** A code was accepted in the last 5 minutes (so an override needs no new code). */
+  stepUpFresh?: boolean;
 }
 
 export function TradeForm({
@@ -27,6 +30,7 @@ export function TradeForm({
   editable,
   submitLabel,
   preview,
+  stepUpFresh = false,
 }: Props) {
   const [state, formAction, pending] = useActionState(action, emptyFormState);
   const formRef = useRef<HTMLFormElement>(null);
@@ -260,6 +264,7 @@ export function TradeForm({
               <input name="overrideReason" size={60} maxLength={500} autoComplete="off" />
             </label>
           </p>
+          <StepUpField fresh={stepUpFresh} />
         </section>
       )}
       <button type="submit" disabled={pending}>

@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
+import { assertFreshAuth, type FreshAuth } from '@/domain/auth/stepup';
 import { ValidationError } from '@/domain/errors';
 import {
   buildRiskContext,
@@ -214,6 +215,8 @@ export function updateRiskSettings(
   db: Db,
   accountId: number,
   requested: Record<string, unknown>,
+  /** A fresh-code proof, or null. Tightening needs none; LOOSENING a limit needs a real proof. */
+  auth: FreshAuth | null,
   now: Date = new Date(),
 ): SettingsChangeResult {
   return db.transaction((tx) => {
@@ -231,6 +234,8 @@ export function updateRiskSettings(
       ]);
     }
     const result = requestSettingsChange(active.settings, pending.pending, requested, now);
+    // Anything queued with the 24-hour delay is a loosening. Thrown before any write: rolled back.
+    if (result.deferred.length > 0) assertFreshAuth(auth, now, 'loosening a risk limit');
     tx.update(riskSettings)
       .set({
         settingsJson: JSON.stringify(result.active),
@@ -260,9 +265,11 @@ export function restoreDefaultRiskSettings(
   db: Db,
   accountId: number,
   input: { confirm?: string | null; reason?: string | null },
+  auth: FreshAuth,
   now: Date = new Date(),
 ): void {
   const { reason } = validateReset(input);
+  assertFreshAuth(auth, now, 'restoring the default risk settings');
   db.transaction((tx) => {
     if (!getAccount(tx, accountId)) throw new NotFoundError(`Account ${accountId}`);
     tx.insert(riskSettings)
@@ -340,9 +347,11 @@ export function resetHalt(
   accountId: number,
   kind: Extract<HaltKind, 'manual' | 'drawdown'>,
   input: { confirm?: string | null; reason?: string | null },
+  auth: FreshAuth,
   now: Date = new Date(),
 ): void {
   const { reason } = validateReset(input);
+  assertFreshAuth(auth, now, 'resetting a halt');
   const outcome = db.transaction((tx): { refused: string } | { done: true } => {
     const ctx = syncRiskStateIn(tx, accountId, now);
     if (!ctx.accountKnown) throw new NotFoundError(`Account ${accountId}`);

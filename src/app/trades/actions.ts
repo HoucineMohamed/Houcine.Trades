@@ -4,8 +4,9 @@ import { redirect } from 'next/navigation';
 import { evaluatePlanForAccount } from '@/data/risk';
 import { closeTradeAndSync, logTrade, openTradeChecked, RiskRefusalError } from '@/data/journal';
 import { cancelTrade, updateTrade } from '@/data/trades';
+import { StepUpRequiredError } from '@/domain/auth/stepup';
 import type { VerdictNumbers } from '@/domain/risk';
-import { guardedAction } from '../_lib/guard-core';
+import { guardedAction, optionalFreshAuth } from '../_lib/guard-core';
 import { errorMessages, formValues, toId, type FormState, type FormValues } from '../_lib/form';
 import {
   closeInputFromForm,
@@ -60,8 +61,14 @@ export const createTradeAction = guardedAction(
     try {
       logTrade(ctx.db, createInputFromForm(values), {
         override: overrideFromForm(values),
+        // Needed only when a refused plan is logged anyway (an override).
+        auth: optionalFreshAuth(ctx, formData),
       });
     } catch (error) {
+      if (error instanceof StepUpRequiredError) {
+        // Keep the override fields on screen so the code can be typed and the form re-sent.
+        return { errors: errorMessages(error), values, needsOverride: true };
+      }
       if (error instanceof RiskRefusalError) {
         return {
           errors: [
@@ -97,6 +104,7 @@ export const openTradeAction = guardedAction(async (ctx, formData: FormData) => 
   try {
     openTradeChecked(ctx.db, toId(v.id) ?? -1, openInputFromForm(v), {
       override: overrideFromForm(v),
+      auth: optionalFreshAuth(ctx, formData),
     });
     target = ok('Trade opened');
   } catch (error) {

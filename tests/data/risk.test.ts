@@ -12,8 +12,12 @@ import {
   updateRiskSettings,
 } from '@/data/risk';
 import { listRiskEvents } from '@/data/risk-events';
+import { issueFreshAuth } from '@/domain/auth/stepup';
 import { ValidationError } from '@/domain/errors';
 import { at, closedTrade, restartDb, riskDb } from '../helpers/risk';
+
+/** A genuine step-up proof verified at `now`. */
+const fresh = (now: Date) => issueFreshAuth(1, now);
 
 const plan = (over: Record<string, string | null> = {}) => ({
   symbol: 'BTCUSDT',
@@ -147,13 +151,27 @@ describe('manual halt (the kill switch)', () => {
     haltManually(db, 1, 'cooling off', NOW);
     const before = eventKinds(db).length;
     expect(() =>
-      resetHalt(db, 1, 'manual', { confirm: 'reset', reason: 'rested and reviewed my plan' }, NOW),
+      resetHalt(
+        db,
+        1,
+        'manual',
+        { confirm: 'reset', reason: 'rested and reviewed my plan' },
+        fresh(NOW),
+        NOW,
+      ),
     ).toThrow(ValidationError);
-    expect(() => resetHalt(db, 1, 'manual', { confirm: 'RESET', reason: 'short' }, NOW)).toThrow(
-      /at least 10/,
-    );
+    expect(() =>
+      resetHalt(db, 1, 'manual', { confirm: 'RESET', reason: 'short' }, fresh(NOW), NOW),
+    ).toThrow(/at least 10/);
     expect(eventKinds(db)).toHaveLength(before); // mistakes in typing are not events
-    resetHalt(db, 1, 'manual', { confirm: 'RESET', reason: 'rested and reviewed my plan' }, NOW);
+    resetHalt(
+      db,
+      1,
+      'manual',
+      { confirm: 'RESET', reason: 'rested and reviewed my plan' },
+      fresh(NOW),
+      NOW,
+    );
     expect(kinds(db, NOW)).toEqual([]);
     expect(evaluatePlanForAccount(db, 1, plan(), NOW).verdict.approved).toBe(true);
     const reset = listRiskEvents(db, 1, 1)[0]!;
@@ -167,7 +185,14 @@ describe('manual halt (the kill switch)', () => {
   it('refuses a second halt, a reset of nothing, and an empty reason', () => {
     const db = riskDb();
     expect(() =>
-      resetHalt(db, 1, 'manual', { confirm: 'RESET', reason: 'nothing is halted here' }, NOW),
+      resetHalt(
+        db,
+        1,
+        'manual',
+        { confirm: 'RESET', reason: 'nothing is halted here' },
+        fresh(NOW),
+        NOW,
+      ),
     ).toThrow(/no active manual halt/);
     expect(() => haltManually(db, 1, 'ab', NOW)).toThrow(ValidationError);
     haltManually(db, 1, 'first', NOW);
@@ -199,7 +224,9 @@ describe('drawdown halt: reset only 24 hours after it began', () => {
   it('before 24 hours: refused with the time remaining, and the attempt is logged', () => {
     const db = breached();
     const early = at('2026-03-03T08:59:59.999Z');
-    expect(() => resetHalt(db, 1, 'drawdown', RESET, early)).toThrow(/24 hours.*0h 00m 01s/);
+    expect(() => resetHalt(db, 1, 'drawdown', RESET, fresh(early), early)).toThrow(
+      /24 hours.*0h 00m 01s/,
+    );
     expect(kinds(db, early)).toEqual(['drawdown']); // still halted
     const last = listRiskEvents(db, 1, 1)[0]!;
     expect(last).toMatchObject({
@@ -216,7 +243,7 @@ describe('drawdown halt: reset only 24 hours after it began', () => {
   it('exactly at 24 hours: allowed, and the new baseline is the equity at that moment', () => {
     const db = breached();
     const exactly = at('2026-03-03T09:00:00.000Z');
-    resetHalt(db, 1, 'drawdown', RESET, exactly);
+    resetHalt(db, 1, 'drawdown', RESET, fresh(exactly), exactly);
     const reset = listRiskEvents(db, 1, 1)[0]!;
     expect(reset).toMatchObject({ kind: 'reset', haltKind: 'drawdown' });
     expect(JSON.parse(reset.detailsJson)).toMatchObject({
@@ -234,7 +261,14 @@ describe('drawdown halt: reset only 24 hours after it began', () => {
 
   it('after 24 hours: allowed', () => {
     const db = breached();
-    resetHalt(db, 1, 'drawdown', RESET, at('2026-03-20T00:00:00.000Z'));
+    resetHalt(
+      db,
+      1,
+      'drawdown',
+      RESET,
+      fresh(at('2026-03-20T00:00:00.000Z')),
+      at('2026-03-20T00:00:00.000Z'),
+    );
     expect(kinds(db, at('2026-03-20T00:00:01.000Z'))).toEqual([]);
   });
 
@@ -243,7 +277,14 @@ describe('drawdown halt: reset only 24 hours after it began', () => {
     const restarted = restartDb(db);
     expect(kinds(restarted, at('2026-03-03T01:00:00.000Z'))).toEqual(['drawdown']);
     expect(() =>
-      resetHalt(restarted, 1, 'drawdown', RESET, at('2026-03-03T01:00:00.000Z')),
+      resetHalt(
+        restarted,
+        1,
+        'drawdown',
+        RESET,
+        fresh(at('2026-03-03T01:00:00.000Z')),
+        at('2026-03-03T01:00:00.000Z'),
+      ),
     ).toThrow(/24 hours/);
   });
 
@@ -256,6 +297,7 @@ describe('drawdown halt: reset only 24 hours after it began', () => {
         1,
         'drawdown',
         { confirm: 'yes', reason: 'reviewed my trades' },
+        fresh(at('2026-03-20T00:00:00.000Z')),
         at('2026-03-20T00:00:00.000Z'),
       ),
     ).toThrow(ValidationError);
@@ -265,9 +307,16 @@ describe('drawdown halt: reset only 24 hours after it began', () => {
   it('a daily-loss halt cannot be reset at all', () => {
     const db = riskDb();
     closedTrade(db, { pnl: -400, closedAt: '2026-03-10T10:00:00.000Z' });
-    expect(() => resetHalt(db, 1, 'drawdown', RESET, at('2026-03-10T15:00:00.000Z'))).toThrow(
-      /no active drawdown halt/,
-    );
+    expect(() =>
+      resetHalt(
+        db,
+        1,
+        'drawdown',
+        RESET,
+        fresh(at('2026-03-10T15:00:00.000Z')),
+        at('2026-03-10T15:00:00.000Z'),
+      ),
+    ).toThrow(/no active drawdown halt/);
     expect(kinds(db, at('2026-03-10T15:00:00.000Z'))).toEqual(['daily_loss']);
   });
 
@@ -275,7 +324,14 @@ describe('drawdown halt: reset only 24 hours after it began', () => {
     const db = breached();
     closedTrade(db, { pnl: 1000, closedAt: '2026-03-02T10:00:00.000Z' }); // equity back to 11800
     expect(kinds(db, at('2026-03-02T12:00:00.000Z'))).toEqual(['drawdown']);
-    resetHalt(db, 1, 'drawdown', RESET, at('2026-03-03T10:00:00.000Z')); // baseline 11800
+    resetHalt(
+      db,
+      1,
+      'drawdown',
+      RESET,
+      fresh(at('2026-03-03T10:00:00.000Z')),
+      at('2026-03-03T10:00:00.000Z'),
+    ); // baseline 11800
     closedTrade(db, { pnl: -1180, closedAt: '2026-03-05T10:00:00.000Z' }); // exactly 10 % of 11800
     expect(kinds(db, at('2026-03-07T00:00:00.000Z'))).toEqual(['drawdown']);
   });
@@ -287,7 +343,7 @@ describe('settings: ceilings, tightening now, loosening after 24 hours', () => {
   it('rejects anything above a hard ceiling and saves nothing', () => {
     const db = riskDb();
     expect(() =>
-      updateRiskSettings(db, 1, { maxRiskPerTradePercent: '3', maxOpenTrades: 9 }, NOW),
+      updateRiskSettings(db, 1, { maxRiskPerTradePercent: '3', maxOpenTrades: 9 }, fresh(NOW), NOW),
     ).toThrow(ValidationError);
     expect(getRiskSettingsView(db, 1, NOW).active?.maxRiskPerTradePercent).toBe('1');
     expect(eventKinds(db)).toEqual(['settings_change']); // only the creation event
@@ -297,7 +353,7 @@ describe('settings: ceilings, tightening now, loosening after 24 hours', () => {
     const db = riskDb();
     // plan risk = 100 = 1 % of 10000: fine now
     expect(evaluatePlanForAccount(db, 1, plan(), NOW).verdict.approved).toBe(true);
-    const r = updateRiskSettings(db, 1, { maxRiskPerTradePercent: '0.5' }, NOW);
+    const r = updateRiskSettings(db, 1, { maxRiskPerTradePercent: '0.5' }, fresh(NOW), NOW);
     expect(r.applied).toHaveLength(1);
     const v = evaluatePlanForAccount(db, 1, plan(), NOW).verdict;
     expect(v.violations.map((x) => x.code)).toEqual(['MAX_RISK_PER_TRADE']);
@@ -309,7 +365,7 @@ describe('settings: ceilings, tightening now, loosening after 24 hours', () => {
     expect(
       evaluatePlanForAccount(db, 1, bigger, NOW).verdict.violations.map((v) => v.code),
     ).toEqual(['MAX_RISK_PER_TRADE']);
-    const r = updateRiskSettings(db, 1, { maxRiskPerTradePercent: '1.5' }, NOW);
+    const r = updateRiskSettings(db, 1, { maxRiskPerTradePercent: '1.5' }, fresh(NOW), NOW);
     expect(r.deferred[0]).toMatchObject({
       field: 'maxRiskPerTradePercent',
       effectiveAt: '2026-03-11T12:00:00.000Z',
@@ -328,7 +384,7 @@ describe('settings: ceilings, tightening now, loosening after 24 hours', () => {
 
   it('the sync saves a loosened setting once it is due, and logs it', () => {
     const db = riskDb();
-    updateRiskSettings(db, 1, { maxOpenTrades: 4 }, NOW);
+    updateRiskSettings(db, 1, { maxOpenTrades: 4 }, fresh(NOW), NOW);
     syncRiskState(db, 1, at('2026-03-11T12:00:00.000Z'));
     const view = getRiskSettingsView(db, 1, at('2026-03-11T12:00:00.000Z'));
     expect(view.active?.maxOpenTrades).toBe(4);
@@ -338,7 +394,13 @@ describe('settings: ceilings, tightening now, loosening after 24 hours', () => {
 
   it('every change is logged with what was applied, deferred and cancelled', () => {
     const db = riskDb();
-    updateRiskSettings(db, 1, { maxRiskPerTradePercent: '0.5', maxDailyLossPercent: '4' }, NOW);
+    updateRiskSettings(
+      db,
+      1,
+      { maxRiskPerTradePercent: '0.5', maxDailyLossPercent: '4' },
+      fresh(NOW),
+      NOW,
+    );
     const e = listRiskEvents(db, 1, 1)[0]!;
     const d = JSON.parse(e.detailsJson);
     expect(d.applied).toHaveLength(1);
@@ -350,7 +412,13 @@ describe('settings: ceilings, tightening now, loosening after 24 hours', () => {
     closedTrade(db, { pnl: 2000, closedAt: '2026-03-01T10:00:00.000Z' });
     closedTrade(db, { pnl: -1200, closedAt: '2026-03-02T09:00:00.000Z' });
     // nobody has looked yet (no latch). The user asks to loosen the drawdown limit...
-    updateRiskSettings(db, 1, { maxDrawdownPercent: '15' }, at('2026-03-02T09:30:00.000Z')); // (this call latches first)
+    updateRiskSettings(
+      db,
+      1,
+      { maxDrawdownPercent: '15' },
+      fresh(at('2026-03-02T09:30:00.000Z')),
+      at('2026-03-02T09:30:00.000Z'),
+    ); // (this call latches first)
     // ...and a day later the looser limit is in force, but the halt stands
     const later = at('2026-03-04T00:00:00.000Z');
     expect(getRiskSettingsView(db, 1, later).effective?.maxDrawdownPercent).toBe('15');
@@ -388,14 +456,17 @@ describe('corrupt settings fail closed, and can be repaired', () => {
   it('a settings change is refused while corrupt; restoring the defaults needs RESET and a reason', () => {
     const db = riskDb();
     db.$client.prepare("UPDATE risk_settings SET settings_json = 'garbage'").run();
-    expect(() => updateRiskSettings(db, 1, { maxOpenTrades: 2 }, NOW)).toThrow(/corrupt/);
-    expect(() => restoreDefaultRiskSettings(db, 1, { confirm: 'no', reason: 'x' }, NOW)).toThrow(
-      ValidationError,
+    expect(() => updateRiskSettings(db, 1, { maxOpenTrades: 2 }, fresh(NOW), NOW)).toThrow(
+      /corrupt/,
     );
+    expect(() =>
+      restoreDefaultRiskSettings(db, 1, { confirm: 'no', reason: 'x' }, fresh(NOW), NOW),
+    ).toThrow(ValidationError);
     restoreDefaultRiskSettings(
       db,
       1,
       { confirm: 'RESET', reason: 'the stored settings were damaged' },
+      fresh(NOW),
       NOW,
     );
     expect(evaluatePlanForAccount(db, 1, plan(), NOW).verdict.approved).toBe(true);

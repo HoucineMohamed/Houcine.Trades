@@ -159,3 +159,117 @@ describe('with a real session', () => {
     await expect(mod.createSetupAction(new FormData())).rejects.toMatchObject({ url: '/login' });
   });
 });
+
+describe('sensitive actions ask for a fresh code (action layer)', () => {
+  async function signInNotFresh(): Promise<void> {
+    const result = await login(
+      request.db as Db,
+      { password: PASSWORD, code: codeAt(secret, new Date()) },
+      CLIENT,
+      { now: new Date() },
+    );
+    if (!result.ok) throw new Error('test sign-in failed');
+    request.cookies = { houcine_session: result.token };
+    // Signing in counts as a fresh code; forget that so the actions must ask again.
+    (request.db as Db).$client.prepare('UPDATE sessions SET step_up_at = NULL').run();
+  }
+  const nextCode = () => codeAt(secret, new Date(Date.now() + 30_000)); // the step after the sign-in's
+  const form = (fields: Record<string, string>) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(fields)) f.set(k, v);
+    return f;
+  };
+  const redirectUrl = async (p: Promise<unknown>): Promise<string> => {
+    try {
+      await p;
+    } catch (e) {
+      return (e as { url?: string }).url ?? '';
+    }
+    return '';
+  };
+  const DEFAULTS = {
+    accountId: '1',
+    maxRiskPerTradePercent: '1',
+    maxDailyLossPercent: '3',
+    maxOpenRiskPercent: '3',
+    maxOpenTrades: '3',
+    maxDrawdownPercent: '10',
+    minRewardToRisk: '1.5',
+  };
+  const RESET = {
+    accountId: '1',
+    haltKind: 'manual',
+    confirm: 'RESET',
+    reason: 'rested and reviewed',
+  };
+
+  beforeEach(async () => {
+    const { createAccount } = await import('@/data/accounts');
+    createAccount(request.db as Db, {
+      name: 'Paper',
+      baseCurrency: 'USDT',
+      startingBalance: '10000',
+    });
+  });
+
+  it('the kill switch needs no code, a reset does', async () => {
+    await signInNotFresh();
+    const risk = await import('@/app/risk/actions');
+    const halt = await redirectUrl(risk.haltAction(form({ accountId: '1', reason: 'unwell' })));
+    expect(decodeURIComponent(halt)).toContain('Trading is halted');
+
+    const refused = decodeURIComponent(await redirectUrl(risk.resetAction(form(RESET))));
+    expect(refused).toContain('fresh authenticator code');
+    const db = request.db as Db;
+    expect(
+      (
+        db.$client.prepare(`SELECT count(*) c FROM risk_events WHERE kind = 'reset'`).get() as {
+          c: number;
+        }
+      ).c,
+    ).toBe(0);
+  });
+
+  it('a wrong typed code is refused; a right one works and is then fresh for 5 minutes', async () => {
+    await signInNotFresh();
+    const risk = await import('@/app/risk/actions');
+    await redirectUrl(risk.haltAction(form({ accountId: '1', reason: 'unwell' })));
+
+    const wrong = decodeURIComponent(
+      await redirectUrl(risk.resetAction(form({ ...RESET, stepUpCode: '000000' }))),
+    );
+    expect(wrong).toContain('not accepted');
+
+    const good = decodeURIComponent(
+      await redirectUrl(risk.resetAction(form({ ...RESET, stepUpCode: nextCode() }))),
+    );
+    expect(good).toContain('halt was reset');
+
+    // Fresh now: another sensitive action needs no new code.
+    await redirectUrl(risk.haltAction(form({ accountId: '1', reason: 'again' })));
+    const again = decodeURIComponent(await redirectUrl(risk.resetAction(form(RESET))));
+    expect(again).toContain('halt was reset');
+  });
+
+  it('loosening a limit needs a code, tightening does not', async () => {
+    await signInNotFresh();
+    const risk = await import('@/app/risk/actions');
+    const tighter = decodeURIComponent(
+      await redirectUrl(
+        risk.updateSettingsAction(form({ ...DEFAULTS, maxRiskPerTradePercent: '0.5' })),
+      ),
+    );
+    expect(tighter).toContain('Applied now');
+    const looser = decodeURIComponent(
+      await redirectUrl(
+        risk.updateSettingsAction(form({ ...DEFAULTS, maxRiskPerTradePercent: '1' })),
+      ),
+    );
+    expect(looser).toContain('fresh authenticator code');
+  });
+
+  it('the typed code is not echoed back to the page', async () => {
+    const { formValues } = await import('@/app/_lib/form');
+    expect(formValues(form({ stepUpCode: '123456', name: 'x' }))).toEqual({ name: 'x' });
+  });
+});

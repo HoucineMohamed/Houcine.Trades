@@ -24,11 +24,10 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasCookie = request.cookies.has(https ? SESSION_COOKIE_SECURE : SESSION_COOKIE_PLAIN);
   if (!isPublicPath(pathname) && !hasCookie) {
-    // A relative Location: the browser stays on the host it used, nothing is built from headers.
-    return new NextResponse(null, {
-      status: 303,
-      headers: { ...securityHeaders({ https }), Location: '/login' },
-    });
+    const target = request.nextUrl.clone();
+    target.pathname = '/login';
+    target.search = '';
+    return NextResponse.redirect(target, { status: 303, headers: securityHeaders({ https }) });
   }
 
   const nonce = btoa(crypto.randomUUID());

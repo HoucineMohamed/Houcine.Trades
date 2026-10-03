@@ -10,6 +10,7 @@ import {
   type RiskField,
 } from '@/domain/risk';
 import { guardedPage } from '../_lib/guard';
+import { StepUpField } from '../_lib/StepUpField';
 import { formatLocal, toId } from '../_lib/form';
 import { haltAction, resetAction, restoreDefaultsAction, updateSettingsAction } from './actions';
 
@@ -60,7 +61,14 @@ export default guardedPage(
         {accounts.length === 0 || !account ? (
           <p>No account yet. Create one in Accounts first.</p>
         ) : (
-          <AccountRisk sp={sp} accounts={accounts} accountId={account.id} now={now} db={db} />
+          <AccountRisk
+            sp={sp}
+            accounts={accounts}
+            accountId={account.id}
+            now={now}
+            db={db}
+            fresh={ctx.auth !== null}
+          />
         )}
       </main>
     );
@@ -73,12 +81,14 @@ function AccountRisk({
   accountId,
   now,
   db,
+  fresh,
 }: {
   sp: SearchParams;
   accounts: ReturnType<typeof listAccounts>;
   accountId: number;
   now: Date;
   db: Db;
+  fresh: boolean;
 }) {
   const ctx = syncRiskState(db, accountId, now); // also records halts that were detected but not yet logged
   const view = getRiskSettingsView(db, accountId, now);
@@ -156,6 +166,7 @@ function AccountRisk({
                   </label>{' '}
                   <button type="submit">Reset this halt</button>
                 </p>
+                <StepUpField fresh={fresh} />
                 {h.kind === 'drawdown' && (
                   <p>
                     <small>
@@ -256,6 +267,7 @@ function AccountRisk({
               </label>{' '}
               <button type="submit">Restore the default settings</button>
             </p>
+            <StepUpField fresh={fresh} />
           </form>
         </div>
       ) : (
@@ -307,6 +319,7 @@ function AccountRisk({
                 })}
               </tbody>
             </table>
+            <StepUpField fresh={fresh} />
             <p>
               <button type="submit">Save settings</button>
             </p>
