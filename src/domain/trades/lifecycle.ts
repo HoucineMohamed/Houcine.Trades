@@ -48,6 +48,7 @@ function fieldsOf(t: TradeFields): TradeFields {
     status: t.status,
     plannedEntry: t.plannedEntry,
     stopLoss: t.stopLoss,
+    initialStopLoss: t.initialStopLoss,
     takeProfit: t.takeProfit,
     size: t.size,
     quoteCurrency: t.quoteCurrency,
@@ -67,14 +68,27 @@ function fieldsOf(t: TradeFields): TradeFields {
 /** Validates new-trade input and returns the fields to store. */
 export function buildNewTrade(input: unknown): TradeFields {
   const parsed = parseWith(createTradeSchema, input);
-  return assertValidTrade({ ...parsed, exitPrice: null, closedAt: null, reviewNotes: '' });
+  return assertValidTrade({
+    ...parsed,
+    // A trade created already open starts with its current stop; a planned one gets it on opening.
+    initialStopLoss: parsed.status === 'open' ? parsed.stopLoss : null,
+    exitPrice: null,
+    closedAt: null,
+    reviewNotes: '',
+  });
 }
 
-/** planned -> open. The real entry price is checked against the stop-loss. */
+/** planned -> open. The real entry price is checked against the stop-loss, which is frozen as the initial stop. */
 export function openTrade(current: TradeFields, input: unknown): TradeFields {
   assertTransition(current.status, 'open');
   const { entryPrice, openedAt } = parseWith(openTradeSchema, input);
-  return assertValidTrade({ ...fieldsOf(current), status: 'open', entryPrice, openedAt });
+  return assertValidTrade({
+    ...fieldsOf(current),
+    status: 'open',
+    entryPrice,
+    openedAt,
+    initialStopLoss: current.stopLoss,
+  });
 }
 
 /** open -> closed. Needs an exit price and a closed time not earlier than the opened time. */

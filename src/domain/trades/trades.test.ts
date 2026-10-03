@@ -495,3 +495,71 @@ describe('findTradeIssues: invariants guard the stored data too', () => {
     );
   });
 });
+
+describe('initial stop-loss (frozen when the trade opens)', () => {
+  const openAt = { entryPrice: '100', openedAt: '2026-10-01T10:00:00Z' };
+
+  it('is empty while planned and cancelled', () => {
+    expect(planned().initialStopLoss).toBeNull();
+    expect(cancelTrade(planned()).initialStopLoss).toBeNull();
+  });
+
+  it('is set when a trade is created already open', () => {
+    const t = buildNewTrade({
+      ...longInput,
+      status: 'open',
+      entryPrice: '101',
+      openedAt: '2026-10-01T10:00:00Z',
+    });
+    expect(t.initialStopLoss).toBe('95');
+  });
+
+  it('is set when a planned trade opens, using the stop at that moment', () => {
+    const edited = editTrade(planned(), { stopLoss: '97' }); // plan changed before opening
+    const o = openTrade(edited, openAt);
+    expect(o).toMatchObject({ stopLoss: '97', initialStopLoss: '97' });
+  });
+
+  it('does not change when the live stop is moved or the trade closes', () => {
+    const o = opened(); // initial 95
+    const moved = editTrade(o, { stopLoss: '99' });
+    expect(moved).toMatchObject({ stopLoss: '99', initialStopLoss: '95' });
+    const closed = closeTrade(moved, { exitPrice: '108', closedAt: '2026-10-02T10:00:00Z' });
+    expect(closed).toMatchObject({ stopLoss: '99', initialStopLoss: '95' });
+  });
+
+  it('cannot be edited directly', () => {
+    expectInvalid(() => editTrade(opened(), { initialStopLoss: '90' }), /initialStopLoss/);
+    expectInvalid(() => editTrade(planned(), { initialStopLoss: '90' }), /initialStopLoss/);
+    expectInvalid(() => planned({ initialStopLoss: '90' }), /initialStopLoss/);
+  });
+
+  it('is part of the invariants: required when open/closed, forbidden when planned/cancelled', () => {
+    const fields = (t: TradeFields) => findTradeIssues(t).map((i) => i.field);
+    expect(fields({ ...opened(), initialStopLoss: null })).toContain('initialStopLoss');
+    expect(fields({ ...planned(), initialStopLoss: '95' })).toContain('initialStopLoss');
+    expect(fields({ ...cancelTrade(planned()), initialStopLoss: '95' })).toContain(
+      'initialStopLoss',
+    );
+  });
+
+  it('must be on the correct side of the real entry', () => {
+    expect(
+      findTradeIssues({ ...opened(), initialStopLoss: '100' })
+        .map((i) => i.message)
+        .join(),
+    ).toMatch(/initial stop-loss .* below the entry price/);
+    expect(
+      findTradeIssues({ ...opened(), initialStopLoss: '101' })
+        .map((i) => i.message)
+        .join(),
+    ).toMatch(/must be below/);
+    const short = openTrade(buildNewTrade(shortInput), openAt);
+    expect(short.initialStopLoss).toBe('105');
+    expect(
+      findTradeIssues({ ...short, initialStopLoss: '99' })
+        .map((i) => i.message)
+        .join(),
+    ).toMatch(/must be above/);
+  });
+});
