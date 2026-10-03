@@ -5,15 +5,16 @@ Private, single-owner financial workspace for Houcine: trading journal and stats
 It will run online 24/7 later. The owner is a trading beginner, so **correctness and safety matter
 more than speed**. Built module by module (see `docs/roadmap.md`).
 
-Status: modules 1 (data model and journal), 2 (stats engine) and 3 (risk engine) are built:
-accounts, setups and trades in SQLite, pure validation, repositories, a minimal functional UI, a
-pure stats engine (`/stats`) and a pure risk engine (`/risk`) that approves or refuses trade
-plans, sizes positions and can halt trading. No auth or integrations yet. Every statistic is
-explained in `docs/stats-glossary.md` and every risk rule in `docs/risk-rules.md`.
+Status: modules 1 (data model and journal), 2 (stats engine), 3 (risk engine) and 4
+(authentication) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
+minimal functional UI, a pure stats engine (`/stats`), a pure risk engine (`/risk`) that approves or
+refuses trade plans, sizes positions and can halt trading, and single-owner login (password +
+authenticator code). No integrations yet. Every statistic is explained in `docs/stats-glossary.md`,
+every risk rule in `docs/risk-rules.md` and every protection in `docs/security.md`.
 
-> **WARNING: there is no authentication yet (module 4).** The app must only run on localhost
-> (`dev` and `start` bind to 127.0.0.1) and must NOT be deployed or exposed to a network until
-> authentication exists.
+> **Authentication exists, hosting does not.** The app still binds to localhost (`dev` and `start`
+> use 127.0.0.1) and must NOT be deployed or exposed until module 8 does HTTPS, `TRUST_PROXY` and
+> backups as listed in `docs/security.md`.
 
 ## Stack
 
@@ -22,9 +23,13 @@ Next.js (App Router) + TypeScript (strict, `noUncheckedIndexedAccess`), SQLite v
 
 ## Folder map
 
-- `src/app/` UI and routes only
+- `src/app/` UI and routes only. Every page, server action and route handler is wrapped by the guard
+  in `src/app/_lib/` (`guardedPage` / `guardedAction` / `guardedRoute`; only `/login` is public)
+- `src/auth/` server-only auth code (argon2id, TOTP, sessions, services); `scripts/auth/` the
+  command-line owner scripts; `src/proxy.ts` first-line redirect, CSRF check, CSP and headers
 - `src/domain/` pure logic (no I/O; ESLint enforces it): `money/` (decimal.js helper), `trades/`
-  (validation, lifecycle), `accounts/`, `setups/`, `stats/` (pure stats engine), `risk/` (pure risk engine)
+  (validation, lifecycle), `accounts/`, `setups/`, `stats/` (pure stats engine), `risk/` (pure risk
+  engine), `auth/` (pure auth rules: password policy, throttle, session timing, `FreshAuth`)
 - `src/data/` database access: `schema.ts`, `client.ts`, repositories (`accounts`, `setups`, `trades`,
   `risk`, `risk-events`) and the `journal.ts` gate (every trade enters through the risk engine)
 - `drizzle/` committed SQL migrations (generated, do not edit by hand)
@@ -46,6 +51,8 @@ Dependency direction: `app -> domain, data`; `data -> domain, config`; `integrat
 - `npm run db:migrate` apply migrations to the database in `DATABASE_URL` (run once after cloning
   and after pulling new migrations)
 - `npm run db:generate` create a new migration after changing `src/data/schema.ts` (commit it)
+- `npm run auth:generate-secret` print a random `AUTH_SECRET`; `npm run auth:create-owner` create the
+  one owner (real terminal only); `npm run auth:reset` reset password and authenticator
 
 Before every commit: lint, typecheck and tests must pass.
 
@@ -96,9 +103,28 @@ Before every commit: lint, typecheck and tests must pass.
   refused plan may be LOGGED only with a typed `OVERRIDE` and a reason, and is flagged forever.
   **REAL ORDER EXECUTION (module 9) HAS NO OVERRIDE:** it must call
   `requireApprovedForExecution(verdict)`; a refused plan can never become an order.
+- Authentication rules (module 4), details in `docs/security.md`:
+  - **No bypass:** no `AUTH_DISABLED`, no default credentials, no secret in code. The app refuses a
+    missing, short or placeholder `AUTH_SECRET` and then lets nobody in (fail closed).
+  - **Every entry point is guarded.** New pages must `export default guardedPage(...)`, server
+    actions `export const x = guardedAction(...)` (from `_lib/guard-core`), route handlers
+    `guardedRoute(...)`. `tests/auth/guard-coverage.test.ts` fails otherwise; layouts never touch
+    data; `src/app` cannot import `getDb` (use `ctx.db`). `proxy.ts` is only a first line.
+  - **Step-up:** anything that loosens safety (loosening a limit, resetting a halt, an override,
+    security settings) takes a `FreshAuth` (a code entered in the last 5 minutes, issued only by
+    `src/auth`). The kill switch (starting a halt) needs none. **Real order execution (module 9)
+    must require `FreshAuth` as well as `requireApprovedForExecution`.**
+  - One owner (database-enforced), created and reset only by the command-line scripts: never add
+    a web sign-up or reset. Never log or return passwords, codes, tokens, hashes or secrets;
+    `auth_events` is append-only. Rate-limit state lives in SQLite and rejected attempts are not
+    counted.
+  - Cookies: HttpOnly, SameSite=Strict, `__Host-` + Secure over HTTPS. CSRF: Origin must match Host.
+    CSP has no `unsafe-inline`: no inline `style=` attributes or inline scripts (use `globals.css`).
+  - Vet and discuss new dependencies first (rule 8); do not add one silently.
 - Hand-written SQL in migrations is not tracked by drizzle-kit: the triggers protecting
   `initial_stop_loss` (`0001`), `closed_recorded_at` and the append-only `risk_events` /
-  `risk_verdicts` (`0002`). A future migration that rebuilds a table must re-create its triggers;
+  `risk_verdicts` (`0002`), and the auth triggers (`0003`: single owner, append-only `auth_events`,
+  frozen session identity, final revocation, single-use recovery codes). A future migration that rebuilds a table must re-create its triggers;
   tests list every trigger and fail if one is missing.
 - Schema changes: edit `src/data/schema.ts`, run `npm run db:generate`, commit the new file in
   `drizzle/`. CI fails if the schema and migrations disagree.

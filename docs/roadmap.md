@@ -29,8 +29,18 @@ Modules are built in this order, each on its own branch with tests and small com
    separated in the stats (proposal in `docs/risk-rules.md`: a `ruleOverride` field and a "By rule
    compliance" breakdown); repeated drawdown resets are possible by design (each is logged);
    closed times are typed by you (the recorded time covers backdating).
-4. **Authentication**: single-owner login. Must exist before any hosting. _Done when_: every
-   route and API is protected.
+4. **Authentication** - **DONE**: single-owner login with password (argon2id) plus authenticator
+   code (TOTP) and 10 single-use recovery codes; the owner is created and reset only by command
+   line (`npm run auth:create-owner`, `auth:reset`); server-side sessions (hashed token, idle
+   and absolute timeouts, rotation, revocation); `/login`, `/security`, `/step-up`; a fresh
+   authenticator code (step-up, 5 minutes, type-enforced `FreshAuth`) for loosening limits,
+   resetting halts, overrides and security settings, while the kill switch stays one click; a guard
+   on every page, action and route handler enforced by tests; Origin/Host CSRF check, nonce-based CSP
+   and security headers; progressive rate limiting kept in SQLite; append-only `auth_events`. Plain
+   language in `docs/security.md`. _Done when_: every route and API is protected (it is, and a test
+   proves it). Carried forward: gitleaks in CI is **not yet added** because its release checksum could
+   not be verified (see below); the app still binds to 127.0.0.1 and hosting needs module 8
+   (HTTPS, `TRUST_PROXY`, backups of the database and of `AUTH_SECRET`).
 5. **Dashboard UI**: journal and stats views. _Done when_: owner can use it daily locally.
 6. **Claude analyst and TradingView MCP**: AI analysis; the AI never does the math. Vet the MCP
    server first (rule 8).
@@ -45,13 +55,18 @@ Modules are built in this order, each on its own branch with tests and small com
 
 ## Required before the relevant step
 
-- **Authentication (module 4) before any hosting or network exposure.** Until then the app binds
-  to 127.0.0.1 only, and every page shows a warning.
+- **Authentication (module 4) before any hosting or network exposure** - built. The app still binds
+  to 127.0.0.1 only; `docs/security.md` lists what module 8 must do (HTTPS, proxy and
+  `TRUST_PROXY`, backups, `AUTH_SECRET`).
 - **Backups (module 8):** until then the SQLite file in `data/` is the only copy of the journal.
   Copy `data/houcine-trades.db` (with the app stopped) if the data matters.
-- **Secret scanning (gitleaks)** is deferred but **must be added (pre-commit and CI) before any
-  real API key is used**, at the latest before module 6 (Claude/TradingView keys) and certainly
-  before module 9.
+- **Secret scanning:** a built-in test (`tests/security/secret-scan.test.ts`), `.gitleaks.toml` and an
+  optional pre-commit hook exist. The **gitleaks CI step is still missing** (its release checksum
+  could not be verified, so nothing unverified was pinned): finish it as described in
+  `docs/security.md` **before any real API key is used**, at the latest before module 6
+  (Claude/TradingView keys) and certainly before module 9.
+- **Module 9 must require `FreshAuth`** (and `requireApprovedForExecution`) for anything that can
+  place an order.
 - Turn on GitHub branch protection for the default branch (PRs required, CI required) to enforce
   rule 7.
 - Known: `npm audit` reports dev-only advisories (`braces` via `eslint-config-next`, and an old
