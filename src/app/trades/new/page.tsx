@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { listAccounts } from '@/data/accounts';
 import { listSetups } from '@/data/setups';
-import { requireDb } from '../../_lib/db';
+import { guardedPage } from '../../_lib/guard';
 import { createTradeAction, previewRiskAction } from '../actions';
 import { TradeForm } from '../TradeForm';
 
-export default async function NewTradePage() {
-  const db = await requireDb();
+export default guardedPage(async (ctx) => {
+  const db = ctx.db;
   const accounts = listAccounts(db);
   const setups = listSetups(db);
   return (
@@ -34,4 +34,4 @@ export default async function NewTradePage() {
       )}
     </main>
   );
-}
+});

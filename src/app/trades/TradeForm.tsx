@@ -83,7 +83,7 @@ export function TradeForm({
         </div>
       )}
       {/* Remount the inputs after a failed submit so they show what you typed. */}
-      <fieldset key={JSON.stringify(state.values)} style={{ border: 0, padding: 0 }}>
+      <fieldset key={JSON.stringify(state.values)} className="plain-fieldset">
         {mode === 'create'
           ? row(
               'Account',
@@ -196,10 +196,7 @@ export function TradeForm({
         )}
       </fieldset>
       {preview && (
-        <section
-          aria-live="polite"
-          style={{ border: '1px solid #888', padding: '0.5rem 1rem', margin: '1rem 0' }}
-        >
+        <section aria-live="polite" className="box">
           <strong>Risk check{checking ? ' (checking…)' : ''}</strong>
           {verdict === null ? (
             <p>Fill in the plan to see the risk check.</p>
@@ -244,7 +241,7 @@ export function TradeForm({
         </section>
       )}
       {preview && refused && (
-        <section style={{ border: '1px solid #c33', padding: '0.5rem 1rem', margin: '1rem 0' }}>
+        <section className="box box-danger">
           <strong>Log it anyway? (override)</strong>
           <p>
             <small>

@@ -8,7 +8,7 @@ import {
   updateRiskSettings,
 } from '@/data/risk';
 import { riskFieldLabel, type SettingsChangeResult } from '@/domain/risk';
-import { requireDb } from '../_lib/db';
+import { guardedAction } from '../_lib/guard-core';
 import { errorMessages, formValues, toId } from '../_lib/form';
 
 const back = (accountId: number | undefined, kind: 'ok' | 'error', message: string) =>
@@ -36,12 +36,12 @@ function describe(result: SettingsChangeResult): string {
   return parts.length > 0 ? parts.join('. ') : 'Nothing changed.';
 }
 
-export async function updateSettingsAction(formData: FormData) {
+export const updateSettingsAction = guardedAction(async (ctx, formData: FormData) => {
   const v = formValues(formData);
   const accountId = toId(v.accountId);
   let target: string;
   try {
-    const result = updateRiskSettings(await requireDb(), accountId ?? -1, {
+    const result = updateRiskSettings(ctx.db, accountId ?? -1, {
       maxRiskPerTradePercent: v.maxRiskPerTradePercent,
       maxDailyLossPercent: v.maxDailyLossPercent,
       maxOpenRiskPercent: v.maxOpenRiskPercent,
@@ -54,15 +54,15 @@ export async function updateSettingsAction(formData: FormData) {
     target = back(accountId, 'error', errorMessages(error).join(' | '));
   }
   redirect(target);
-}
+});
 
 /** The kill switch. */
-export async function haltAction(formData: FormData) {
+export const haltAction = guardedAction(async (ctx, formData: FormData) => {
   const v = formValues(formData);
   const accountId = toId(v.accountId);
   let target: string;
   try {
-    haltManually(await requireDb(), accountId ?? -1, v.reason ?? '');
+    haltManually(ctx.db, accountId ?? -1, v.reason ?? '');
     target = back(
       accountId,
       'ok',
@@ -72,29 +72,29 @@ export async function haltAction(formData: FormData) {
     target = back(accountId, 'error', errorMessages(error).join(' | '));
   }
   redirect(target);
-}
+});
 
-export async function resetAction(formData: FormData) {
+export const resetAction = guardedAction(async (ctx, formData: FormData) => {
   const v = formValues(formData);
   const accountId = toId(v.accountId);
   const kind = v.haltKind === 'drawdown' ? 'drawdown' : 'manual';
   let target: string;
   try {
-    resetHalt(await requireDb(), accountId ?? -1, kind, { confirm: v.confirm, reason: v.reason });
+    resetHalt(ctx.db, accountId ?? -1, kind, { confirm: v.confirm, reason: v.reason });
     target = back(accountId, 'ok', `The ${kind} halt was reset and the reset was logged.`);
   } catch (error) {
     target = back(accountId, 'error', errorMessages(error).join(' | '));
   }
   redirect(target);
-}
+});
 
 /** Recovery when the stored settings are corrupt. */
-export async function restoreDefaultsAction(formData: FormData) {
+export const restoreDefaultsAction = guardedAction(async (ctx, formData: FormData) => {
   const v = formValues(formData);
   const accountId = toId(v.accountId);
   let target: string;
   try {
-    restoreDefaultRiskSettings(await requireDb(), accountId ?? -1, {
+    restoreDefaultRiskSettings(ctx.db, accountId ?? -1, {
       confirm: v.confirm,
       reason: v.reason,
     });
@@ -107,4 +107,4 @@ export async function restoreDefaultsAction(formData: FormData) {
     target = back(accountId, 'error', errorMessages(error).join(' | '));
   }
   redirect(target);
-}
+});

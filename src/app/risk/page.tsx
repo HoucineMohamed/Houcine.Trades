@@ -1,3 +1,4 @@
+import type { Db } from '@/data/client';
 import { listAccounts } from '@/data/accounts';
 import { formatRemaining, getRiskSettingsView, syncRiskState } from '@/data/risk';
 import { listRiskEvents } from '@/data/risk-events';
@@ -8,7 +9,7 @@ import {
   riskFieldLabel,
   type RiskField,
 } from '@/domain/risk';
-import { requireDb } from '../_lib/db';
+import { guardedPage } from '../_lib/guard';
 import { formatLocal, toId } from '../_lib/form';
 import { haltAction, resetAction, restoreDefaultsAction, updateSettingsAction } from './actions';
 
@@ -37,31 +38,34 @@ const CEILING: Record<RiskField, string> = {
 
 const blank = (v: string | undefined) => (v === undefined || v.trim() === '' ? null : v.trim());
 
-export default async function RiskPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const sp = await searchParams;
-  const db = await requireDb();
-  const accounts = listAccounts(db);
-  const account = accounts.find((a) => a.id === (toId(sp.account) ?? accounts[0]?.id));
-  const now = new Date();
+export default guardedPage(
+  async (ctx, { searchParams }: { searchParams: Promise<SearchParams> }) => {
+    const sp = await searchParams;
+    const db = ctx.db;
+    const accounts = listAccounts(db);
+    const account = accounts.find((a) => a.id === (toId(sp.account) ?? accounts[0]?.id));
+    const now = new Date();
 
-  return (
-    <main>
-      <h1>Risk</h1>
-      <p>
-        Your safety rules, enforced by tested code. The engine has the final say: a plan that breaks
-        a limit is refused with reasons. Every rule is explained in <code>docs/risk-rules.md</code>.
-      </p>
-      {sp.ok && <p role="status">✅ {sp.ok}</p>}
-      {sp.error && <p role="alert">❌ {sp.error}</p>}
+    return (
+      <main>
+        <h1>Risk</h1>
+        <p>
+          Your safety rules, enforced by tested code. The engine has the final say: a plan that
+          breaks a limit is refused with reasons. Every rule is explained in{' '}
+          <code>docs/risk-rules.md</code>.
+        </p>
+        {sp.ok && <p role="status">✅ {sp.ok}</p>}
+        {sp.error && <p role="alert">❌ {sp.error}</p>}
 
-      {accounts.length === 0 || !account ? (
-        <p>No account yet. Create one in Accounts first.</p>
-      ) : (
-        <AccountRisk sp={sp} accounts={accounts} accountId={account.id} now={now} db={db} />
-      )}
-    </main>
-  );
-}
+        {accounts.length === 0 || !account ? (
+          <p>No account yet. Create one in Accounts first.</p>
+        ) : (
+          <AccountRisk sp={sp} accounts={accounts} accountId={account.id} now={now} db={db} />
+        )}
+      </main>
+    );
+  },
+);
 
 function AccountRisk({
   sp,
@@ -74,7 +78,7 @@ function AccountRisk({
   accounts: ReturnType<typeof listAccounts>;
   accountId: number;
   now: Date;
-  db: Awaited<ReturnType<typeof requireDb>>;
+  db: Db;
 }) {
   const ctx = syncRiskState(db, accountId, now); // also records halts that were detected but not yet logged
   const view = getRiskSettingsView(db, accountId, now);
@@ -118,11 +122,7 @@ function AccountRisk({
         <p>✅ Trading is NOT halted.</p>
       ) : (
         ctx.halts.map((h) => (
-          <div
-            key={h.kind}
-            role="alert"
-            style={{ border: '2px solid #c33', padding: '0.5rem 1rem', margin: '0.5rem 0' }}
-          >
+          <div key={h.kind} role="alert" className="box box-halt">
             <p>
               <strong>🛑 HALTED ({h.kind.replace('_', ' ')})</strong>
             </p>

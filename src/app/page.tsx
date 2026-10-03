@@ -1,8 +1,9 @@
 import Link from 'next/link';
+import { guardedPage } from './_lib/guard';
 
-export default function HomePage() {
+export default guardedPage(() => {
   return (
-    <main style={{ maxWidth: 640 }}>
+    <main className="narrow">
       <h1>Houcine.Trades</h1>
       <p>
         Private trading workspace. Mode: <strong>paper</strong>.
@@ -27,4 +28,4 @@ export default function HomePage() {
       </ol>
     </main>
   );
-}
+});

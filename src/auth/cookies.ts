@@ -14,8 +14,9 @@ import type { HeaderReader } from './client';
  *   is believed only when TRUST_PROXY=true.
  */
 
-export const SESSION_COOKIE_PLAIN = 'houcine_session';
-export const SESSION_COOKIE_SECURE = '__Host-houcine_session';
+import { SESSION_COOKIE_PLAIN, SESSION_COOKIE_SECURE } from './cookie-names';
+
+export { SESSION_COOKIE_PLAIN, SESSION_COOKIE_SECURE };
 
 export function isHttpsRequest(
   headers: HeaderReader,
