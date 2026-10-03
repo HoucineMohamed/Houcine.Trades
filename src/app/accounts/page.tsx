@@ -16,6 +16,13 @@ export default async function AccountsPage({
       {ok && <p role="status">✅ {ok}</p>}
       {error && <p role="alert">❌ {error}</p>}
 
+      <p role="note">
+        ℹ️ <strong>Set the base currency to the currency you actually trade in</strong> (for example
+        USDT if you trade BTCUSDT, USD if you trade EURUSD). The starting balance and the drawdown
+        percentage on the Stats page only work for trades quoted in this currency, because
+        currencies are never converted.
+      </p>
+
       <h2>New paper account</h2>
       <form action={createAccountAction}>
         <p>
@@ -25,7 +32,8 @@ export default async function AccountsPage({
         </p>
         <p>
           <label>
-            Base currency <input name="baseCurrency" required placeholder="USD" maxLength={10} />
+            Base currency (the currency you trade in){' '}
+            <input name="baseCurrency" required placeholder="USDT" maxLength={10} />
           </label>
         </p>
         <p>

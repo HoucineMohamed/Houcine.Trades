@@ -18,6 +18,9 @@ export default function HomePage() {
           Log a trade in <Link href="/trades/new">New trade</Link>, then follow it in{' '}
           <Link href="/trades">Trades</Link>.
         </li>
+        <li>
+          See numbers for your closed trades in <Link href="/stats">Stats</Link>.
+        </li>
       </ol>
     </main>
   );
