@@ -39,8 +39,19 @@ export const ARGON2_OPTIONS = {
 /** NFKC makes the same typed password identical on Windows and macOS keyboards. */
 const prepare = (password: string) => password.normalize('NFKC');
 
+// Tests hash dozens of passwords; they may switch to the OWASP minimum. This refuses to do
+// anything outside the test runner, so it cannot weaken the real application.
+let hashOptions:
+  | typeof ARGON2_OPTIONS
+  | { algorithm: 2; memoryCost: number; timeCost: number; parallelism: number } = ARGON2_OPTIONS;
+export function enableFastPasswordHashingForTests(): void {
+  if (process.env.NODE_ENV !== 'test')
+    throw new Error('Fast password hashing is only allowed in tests.');
+  hashOptions = { algorithm: 2, memoryCost: 8_192, timeCost: 1, parallelism: 1 };
+}
+
 export async function hashPassword(password: string): Promise<string> {
-  return argonHash(prepare(password), ARGON2_OPTIONS);
+  return argonHash(prepare(password), hashOptions);
 }
 
 /** Never throws: a malformed hash or any error is simply "not a match". */
