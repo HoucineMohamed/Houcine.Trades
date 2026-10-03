@@ -9,8 +9,14 @@ import Decimal from 'decimal.js';
  * Limits: up to 30 digits before the point and 18 after it.
  */
 
-// Own copy of Decimal so global settings elsewhere can never change our results.
-const D = Decimal.clone({ precision: 60, rounding: Decimal.ROUND_HALF_EVEN });
+// Own copy of Decimal so global settings elsewhere can never change our results. 80 significant
+// digits keep products of two 30-digit numbers (and long sums of them) exact; the stats engine
+// shares this class for its internal arithmetic and rounds only once, at the very end.
+const D = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_HALF_EVEN });
+
+/** High-precision decimal class for internal arithmetic (never serialise it: use toFixed()). */
+export const Dec = D;
+export type Dec = InstanceType<typeof D>;
 
 const DECIMAL_PATTERN = /^\d{1,30}(\.\d{1,18})?$/;
 
