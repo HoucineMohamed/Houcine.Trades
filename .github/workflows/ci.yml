@@ -18,6 +18,15 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: Check migrations are up to date
+        run: |
+          npm run db:generate
+          if [ -n "$(git status --porcelain drizzle)" ]; then
+            echo "The schema changed without a committed migration."
+            echo "Run 'npm run db:generate' locally and commit the drizzle/ folder."
+            git status --porcelain drizzle
+            exit 1
+          fi
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
