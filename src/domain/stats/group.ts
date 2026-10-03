@@ -10,6 +10,14 @@ export function sortChronologically(calcs: TradeCalc[]): TradeCalc[] {
 
 const sum = (values: Dec[]) => values.reduce((acc, v) => acc.plus(v), new Dec(0));
 
+/** One closed trade as the equity walk needs it. */
+interface EquityStep {
+  tradeId: number;
+  closedAt: string;
+  netPnl: string;
+  net: Dec;
+}
+
 /**
  * Equity curve and maximum drawdown.
  *
@@ -21,18 +29,17 @@ const sum = (values: Dec[]) => values.reduce((acc, v) => acc.plus(v), new Dec(0)
  * largest PERCENT (its amount is the amount of that same fall; earliest wins a tie). The curve
  * begins at the starting balance, so a loss on the very first trade counts as a drawdown.
  */
-export function analyzeEquity(
-  calcs: TradeCalc[],
+function walkEquity(
+  steps: EquityStep[],
   start: Dec | null,
   noStartReason: string,
 ): { curve: EquityCurve; maxDrawdown: MaxDrawdown } {
-  const ordered = sortChronologically(calcs);
   let equity = start ?? new Dec(0);
   let peak = equity;
   let maxAmount = new Dec(0);
   let bestPercent: Dec | null = null;
   let bestPercentAmount = new Dec(0);
-  const points = ordered.map((c) => {
+  const points = steps.map((c) => {
     equity = equity.plus(c.net);
     if (equity.gt(peak)) peak = equity;
     const fall = peak.minus(equity);
@@ -45,16 +52,20 @@ export function analyzeEquity(
       }
     }
     return {
-      tradeId: c.id,
-      closedAt: c.result.closedAt,
-      netPnl: c.result.netPnl,
+      tradeId: c.tradeId,
+      closedAt: c.closedAt,
+      netPnl: c.netPnl,
       equity: exact(equity),
+      peak: exact(peak),
+      fallFromPeak: exact(fall),
     };
   });
 
   const curve: EquityCurve = {
     startsFromAccountBalance: start !== null,
     startingEquity: exact(start ?? new Dec(0)),
+    endingEquity: exact(equity),
+    peakEquity: exact(peak),
     points,
   };
 
@@ -70,13 +81,45 @@ export function analyzeEquity(
     maxDrawdown = {
       amount: exact(maxAmount),
       percent: none(
-        ordered.length === 0
+        steps.length === 0
           ? 'no closed trades'
           : 'the equity never rose above zero, so a percentage cannot be defined',
       ),
     };
   }
   return { curve, maxDrawdown };
+}
+
+export function analyzeEquity(
+  calcs: TradeCalc[],
+  start: Dec | null,
+  noStartReason: string,
+): { curve: EquityCurve; maxDrawdown: MaxDrawdown } {
+  const steps = sortChronologically(calcs).map((c) => ({
+    tradeId: c.id,
+    closedAt: c.result.closedAt,
+    netPnl: c.result.netPnl,
+    net: c.net,
+  }));
+  return walkEquity(steps, start, noStartReason);
+}
+
+/**
+ * The same equity walk for callers that already have per-trade net P&L as text (the risk engine,
+ * which measures drawdown from a manual-reset baseline). `startingEquity` is the balance to begin
+ * from. Trades are ordered by closed time, then trade id.
+ */
+export function analyzeEquityFrom(
+  startingEquity: string,
+  trades: { tradeId: number; closedAt: string; netPnl: string }[],
+): { curve: EquityCurve; maxDrawdown: MaxDrawdown } {
+  const steps = [...trades]
+    .sort(
+      (a, b) =>
+        new Date(a.closedAt).getTime() - new Date(b.closedAt).getTime() || a.tradeId - b.tradeId,
+    )
+    .map((t) => ({ ...t, net: new Dec(t.netPnl) }));
+  return walkEquity(steps, new Dec(startingEquity), 'not applicable');
 }
 
 function sampleSize(tradeCount: number): SampleSize {

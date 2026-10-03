@@ -128,6 +128,10 @@ export interface EquityPoint {
   closedAt: string;
   netPnl: string;
   equity: string;
+  /** Highest equity reached up to and including this point (including the starting equity). */
+  peak: string;
+  /** peak - equity at this point (0 when at a new high). */
+  fallFromPeak: string;
 }
 
 export interface EquityCurve {
@@ -135,6 +139,10 @@ export interface EquityCurve {
   startsFromAccountBalance: boolean;
   /** The starting balance, or "0" when there is none in this currency. */
   startingEquity: string;
+  /** Equity after the last closed trade (the starting equity when there are no trades). */
+  endingEquity: string;
+  /** The highest equity ever reached, including the starting equity. */
+  peakEquity: string;
   /** One point after each closed trade, ordered by closed time (then trade id). */
   points: EquityPoint[];
 }
