@@ -1,0 +1,15 @@
+#!/bin/sh
+# OPTIONAL local secret scan. Enable it once with:
+#   git config core.hooksPath .githooks
+# It needs the gitleaks program installed (https://github.com/gitleaks/gitleaks).
+# Without gitleaks it only prints a reminder and lets the commit through; it never installs anything.
+if command -v gitleaks >/dev/null 2>&1; then
+  # Older gitleaks versions call this "protect --staged"; newer ones "git --staged".
+  if gitleaks git --help >/dev/null 2>&1; then
+    exec gitleaks git --staged --redact --config .gitleaks.toml --no-banner
+  else
+    exec gitleaks protect --staged --redact --config .gitleaks.toml --no-banner
+  fi
+fi
+echo "pre-commit: gitleaks is not installed, secret scan skipped (see docs/security.md)."
+exit 0

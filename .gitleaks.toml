@@ -1,0 +1,22 @@
+# gitleaks configuration (https://github.com/gitleaks/gitleaks, MIT licence).
+# Scans for real secrets in the repository. Uses the built-in rules plus the allowlist below.
+title = "Houcine.Trades"
+
+[extend]
+useDefault = true
+
+# Allowlisted: (1) the exact placeholder in .env.example, (2) the public RFC 6238 test secret used
+# by the TOTP tests. Nothing else is exempt, and no file is allowlisted by path alone.
+[[allowlists]]
+description = "Placeholder values in .env.example"
+condition = "AND"
+paths = ['''^\.env\.example$''']
+regexes = [
+  '''replace-with-the-output-of-the-generate-command-see-docs-security''',
+]
+
+[[allowlists]]
+description = "Public RFC 6238 Appendix B test secret"
+condition = "AND"
+paths = ['''^src/auth/totp\.test\.ts$''']
+regexes = ['''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''']
