@@ -5,10 +5,11 @@ Private, single-owner financial workspace for Houcine: trading journal and stats
 It will run online 24/7 later. The owner is a trading beginner, so **correctness and safety matter
 more than speed**. Built module by module (see `docs/roadmap.md`).
 
-Status: modules 1 (data model and journal) and 2 (stats engine) are built: accounts, setups and
-trades in SQLite, pure validation, repositories, a minimal functional UI, a pure stats engine and a
-plain `/stats` page. No risk engine, auth or integrations yet. Every statistic is explained in
-`docs/stats-glossary.md`.
+Status: modules 1 (data model and journal), 2 (stats engine) and 3 (risk engine) are built:
+accounts, setups and trades in SQLite, pure validation, repositories, a minimal functional UI, a
+pure stats engine (`/stats`) and a pure risk engine (`/risk`) that approves or refuses trade
+plans, sizes positions and can halt trading. No auth or integrations yet. Every statistic is
+explained in `docs/stats-glossary.md` and every risk rule in `docs/risk-rules.md`.
 
 > **WARNING: there is no authentication yet (module 4).** The app must only run on localhost
 > (`dev` and `start` bind to 127.0.0.1) and must NOT be deployed or exposed to a network until
@@ -23,8 +24,9 @@ Next.js (App Router) + TypeScript (strict, `noUncheckedIndexedAccess`), SQLite v
 
 - `src/app/` UI and routes only
 - `src/domain/` pure logic (no I/O; ESLint enforces it): `money/` (decimal.js helper), `trades/`
-  (validation, lifecycle), `accounts/`, `setups/`, `stats/` (pure stats engine), and later `risk/`
-- `src/data/` database access: `schema.ts`, `client.ts`, repositories (`accounts`, `setups`, `trades`)
+  (validation, lifecycle), `accounts/`, `setups/`, `stats/` (pure stats engine), `risk/` (pure risk engine)
+- `src/data/` database access: `schema.ts`, `client.ts`, repositories (`accounts`, `setups`, `trades`,
+  `risk`, `risk-events`) and the `journal.ts` gate (every trade enters through the risk engine)
 - `drizzle/` committed SQL migrations (generated, do not edit by hand)
 - `src/integrations/` `tradingview-mcp/`, `exchanges/` (future adapters)
 - `src/bots/` future bots framework
@@ -82,9 +84,22 @@ Before every commit: lint, typecheck and tests must pass.
   always means "before fees"; the sums of winning and losing trades are called "total winners" and
   "total losers" (measured after fees). Numbers that cannot be computed are `null` with a reason,
   never zero and never a crash. Assumption: spot-style P&L (no leverage, multipliers or funding).
-- Hand-written SQL in a migration (the triggers that protect `initial_stop_loss`, in
-  `drizzle/0001_initial_stop_loss.sql`) is not tracked by drizzle-kit. A future migration that
-  rebuilds the `trades` table must re-create them; a test fails if they are missing.
+- Risk rules (module 3): the risk engine in `src/domain/risk/` has the final say; it FAILS CLOSED
+  (missing, invalid or ambiguous data is a refusal), compares limits with exact decimals, rounds
+  size DOWN, and allows exactly-at-limit (but a halt triggers when its limit is reached). Hard
+  ceilings (2 % per trade, 5 % per day, 6 % open risk, 6 trades, 20 % drawdown) live in code. All
+  halts are DERIVED from the trades and the append-only `risk_events` log, so a restart can never
+  lose one. Equity = starting balance + net realised P&L from the stats engine, in the account
+  base currency only (no unrealised P&L, no currency conversion). The UTC day decides "today".
+- Every trade enters the journal through `logTrade` / `openTradeChecked` in `src/data/journal.ts`
+  (an ESLint rule stops `src/app` from importing the unchecked `createTrade` / `openTrade`). A
+  refused plan may be LOGGED only with a typed `OVERRIDE` and a reason, and is flagged forever.
+  **REAL ORDER EXECUTION (module 9) HAS NO OVERRIDE:** it must call
+  `requireApprovedForExecution(verdict)`; a refused plan can never become an order.
+- Hand-written SQL in migrations is not tracked by drizzle-kit: the triggers protecting
+  `initial_stop_loss` (`0001`), `closed_recorded_at` and the append-only `risk_events` /
+  `risk_verdicts` (`0002`). A future migration that rebuilds a table must re-create its triggers;
+  tests list every trigger and fail if one is missing.
 - Schema changes: edit `src/data/schema.ts`, run `npm run db:generate`, commit the new file in
   `drizzle/`. CI fails if the schema and migrations disagree.
 - Timestamps are UTC ISO strings in the database. The UI converts from and to the computer's local

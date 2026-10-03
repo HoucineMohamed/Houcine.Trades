@@ -63,7 +63,9 @@ refuse to change or erase it and refuse open or closed rows without it. drizzle-
 triggers, so a future migration that rebuilds the `trades` table must re-create them (a test checks
 they exist). Trades that were already open or closed got it by copying their `stop_loss`.
 
-**Not here yet:** risk limits (module 3).
+**Recorded close time (module 3):** `closed_recorded_at` is stamped by the closing write and frozen by a
+trigger. The risk engine uses it, together with `closed_at`, to decide which closed trades count as
+"today" (a backdated loss still counts). Existing closed trades got their last update time.
 
 ## Stats engine (module 2)
 
@@ -92,6 +94,40 @@ src/app/stats      /stats page                     displays the result, calculat
 - **Tests:** a golden dataset with hand-worked arithmetic, edge cases, and invariants over 150
   seeded pseudo-random datasets (final equity = start + net P&L, win rate = wins / total, drawdown
   within the peak, breakdowns add up to the whole, input order does not matter).
+
+## Risk engine (module 3)
+
+`src/domain/risk/` is pure code (decimal.js, no floats, no I/O). Plain-language rules:
+`docs/risk-rules.md`. The flow:
+
+```
+src/data/risk.ts      loadRiskContext(db, accountId, now)    loads facts (stats, open trades, events, settings)
+src/domain/risk       buildRiskContext(...)                  equity, day figures, halts (all derived)
+src/domain/risk       evaluatePlan(plan, context)            verdict: approved, ALL violations, warnings, numbers
+src/data/journal.ts   logTrade / openTradeChecked            the gate: verdict -> save, refuse, or override
+src/app/risk          /risk page                             settings, halts, kill switch, size calculator, events
+```
+
+- **Fail closed:** missing or invalid equity, stop, settings, account, or an open trade whose risk
+  cannot be verified all refuse the plan. Plans in another currency than the account are refused
+  ("risk cannot be verified without currency conversion").
+- **Reuse, not copy:** equity, peak and drawdown walk come from the stats engine
+  (`analyzeEquityFrom`, `peakEquity`, `endingEquity`).
+- **Halts are derived** from the trades and the append-only event log: a daily-loss halt clears at
+  the next UTC midnight; drawdown (reset only 24 h after it began) and manual halts need your typed
+  reset. A reset records a new drawdown baseline. Settings loosening waits 24 h; hard ceilings are
+  in `settings.ts`.
+- **Tables:** `risk_settings` (JSON, validated on every load), `risk_events` and `risk_verdicts`
+  (append-only via triggers). Each trade gets a verdict snapshot when created and when opened.
+- **Journal gate:** `logTrade` and `openTradeChecked` evaluate first. Approved: saved with the
+  verdict. Refused: not saved, refusal logged. Refused + typed `OVERRIDE` + reason: saved, flagged,
+  logged. An ESLint rule keeps the UI from using the unchecked create/open functions.
+  Closing is never blocked. **Real order execution has no override**
+  (`requireApprovedForExecution`).
+- **Tests:** hand-computed golden cases, exact boundaries (at the limit passes, one unit over
+  fails), fail-closed cases, halts over time (before, exactly at and after 24 h; next UTC day),
+  restart simulation (the database copied into a fresh connection), settings ceilings and delays,
+  and invariants over 300 seeded random cases each for the calculator and the evaluation.
 
 ## UI and server actions
 
