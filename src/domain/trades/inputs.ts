@@ -7,7 +7,7 @@ import {
   text,
   timestampField,
 } from '../fields';
-import { ASSET_CLASSES, DIRECTIONS } from './types';
+import { ASSET_CLASSES, DIRECTIONS, STATUSES } from './types';
 
 /**
  * Input schemas for trades (zod, used at the boundary). They check the shape of each field and
@@ -108,3 +108,12 @@ export const editTradeSchema = z.strictObject({
 });
 
 export type EditTradeInput = z.input<typeof editTradeSchema>;
+
+/** Filters for listing trades. All optional; symbol is matched exactly (after upper-casing). */
+export const tradeFilterSchema = z.strictObject({
+  accountId: id('Account').optional(),
+  status: z.enum(STATUSES, { error: `Status must be one of: ${STATUSES.join(', ')}` }).optional(),
+  symbol: symbol.optional(),
+});
+
+export type TradeFilter = z.input<typeof tradeFilterSchema>;
