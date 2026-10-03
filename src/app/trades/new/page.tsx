@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { listAccounts } from '@/data/accounts';
 import { listSetups } from '@/data/setups';
 import { requireDb } from '../../_lib/db';
-import { createTradeAction } from '../actions';
+import { createTradeAction, previewRiskAction } from '../actions';
 import { TradeForm } from '../TradeForm';
 
 export default async function NewTradePage() {
@@ -19,6 +19,7 @@ export default async function NewTradePage() {
       ) : (
         <TradeForm
           action={createTradeAction}
+          preview={previewRiskAction}
           accounts={accounts}
           setups={setups}
           mode="create"

@@ -7,6 +7,8 @@ export interface FormState {
   errors: string[];
   /** What the user typed, sent back so a failed submit does not wipe the form. */
   values: FormValues;
+  /** True when the risk engine refused the plan: the form then offers the override fields. */
+  needsOverride?: boolean;
 }
 
 export const emptyFormState: FormState = { errors: [], values: {} };

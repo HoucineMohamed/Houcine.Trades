@@ -40,6 +40,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           <Link href="/trades">Trades</Link>
           <Link href="/trades/new">New trade</Link>
           <Link href="/stats">Stats</Link>
+          <Link href="/risk">Risk</Link>
           <Link href="/accounts">Accounts</Link>
           <Link href="/setups">Setups</Link>
         </nav>

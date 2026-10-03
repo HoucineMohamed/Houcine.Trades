@@ -15,6 +15,13 @@
       "when": 1791054189758,
       "tag": "0001_initial_stop_loss",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791056248887,
+      "tag": "0002_risk_engine",
+      "breakpoints": true
     }
   ]
 }

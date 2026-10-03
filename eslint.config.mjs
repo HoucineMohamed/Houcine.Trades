@@ -24,12 +24,30 @@ export default defineConfig([
       },
     ),
   },
-  // UI must go through domain/data, never talk to exchanges or bots directly.
+  // UI must go through domain/data, never talk to exchanges or bots directly. It also may not use
+  // the low-level create/open functions: every trade enters the journal through the risk engine.
   {
     files: ['src/app/**/*.{ts,tsx}'],
-    rules: forbid({
-      group: ['@/integrations/*', '@/bots/*'],
-      message: 'UI must not import integrations or bots directly.',
-    }),
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/integrations/*', '@/bots/*'],
+              message: 'UI must not import integrations or bots directly.',
+            },
+          ],
+          paths: [
+            {
+              name: '@/data/trades',
+              importNames: ['createTrade', 'createTradeIn', 'openTrade', 'openTradeIn'],
+              message:
+                'Use logTrade / openTradeChecked from @/data/journal: every trade must pass the risk engine.',
+            },
+          ],
+        },
+      ],
+    },
   },
 ]);

@@ -21,6 +21,9 @@ export default function HomePage() {
         <li>
           See numbers for your closed trades in <Link href="/stats">Stats</Link>.
         </li>
+        <li>
+          Set your safety limits and use the kill switch in <Link href="/risk">Risk</Link>.
+        </li>
       </ol>
     </main>
   );

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { listAccounts } from '@/data/accounts';
+import { getTradeRiskFlags } from '@/data/journal';
 import { listSetups } from '@/data/setups';
 import { listTrades } from '@/data/trades';
 import { ValidationError } from '@/domain/errors';
@@ -43,6 +44,22 @@ function RowActions({ trade, nowLocal }: { trade: Trade; nowLocal: string }) {
                 <label>
                   Opened at{' '}
                   <input name="openedAt" type="datetime-local" required defaultValue={nowLocal} />
+                </label>
+              </p>
+              <p>
+                <small>
+                  If the risk engine refuses to open this trade, you can log it anyway: type
+                  OVERRIDE and a reason (it will be flagged forever). Leave these empty otherwise.
+                </small>
+              </p>
+              <p>
+                <label>
+                  Type OVERRIDE <input name="overrideConfirm" autoComplete="off" />
+                </label>
+              </p>
+              <p>
+                <label>
+                  Reason <input name="overrideReason" size={40} autoComplete="off" />
                 </label>
               </p>
               <button type="submit">Mark as open</button>
@@ -93,6 +110,7 @@ export default async function TradesPage({
   const accounts = listAccounts(db);
   const setupNames = new Map(listSetups(db).map((s) => [s.id, s.name]));
   const accountNames = new Map(accounts.map((a) => [a.id, a.name]));
+  const riskFlags = getTradeRiskFlags(db);
 
   let trades: Trade[] = [];
   let filterError: string | null = null;
@@ -195,6 +213,13 @@ export default async function TradesPage({
                 <td>{formatLocal(t.openedAt)}</td>
                 <td>{formatLocal(t.closedAt)}</td>
                 <td>
+                  {riskFlags.get(t.id)?.overridden && (
+                    <div>
+                      <strong>⚠ OVERRIDE</strong> (broke:{' '}
+                      {riskFlags.get(t.id)?.violationCodes.join(', ')}) —{' '}
+                      {riskFlags.get(t.id)?.overrideReasons.join(' | ')}
+                    </div>
+                  )}
                   {t.planNotes}
                   {t.reviewNotes && <div>Review: {t.reviewNotes}</div>}
                   {t.emotion && <div>Emotion: {t.emotion}</div>}

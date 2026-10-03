@@ -103,7 +103,11 @@ describe('database protection (triggers)', () => {
 
   it('the three triggers exist (a future table rebuild must re-create them)', () => {
     const names = (
-      db.$client.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all() as {
+      db.$client
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'trades_initial_stop%'",
+        )
+        .all() as {
         name: string;
       }[]
     )

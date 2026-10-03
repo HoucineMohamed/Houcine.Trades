@@ -1,0 +1,692 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "bf9f5e99-1799-4165-8aa7-fa8abb6028d0",
+  "prevId": "f93cfdd4-69a4-4115-b6b3-5428c9a03ede",
+  "tables": {
+    "accounts": {
+      "name": "accounts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'paper'"
+        },
+        "base_currency": {
+          "name": "base_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "starting_balance": {
+          "name": "starting_balance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "accounts_mode_check": {
+          "name": "accounts_mode_check",
+          "value": "mode IN ('paper', 'live')"
+        }
+      }
+    },
+    "risk_events": {
+      "name": "risk_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "halt_kind": {
+          "name": "halt_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "trade_id": {
+          "name": "trade_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "details_json": {
+          "name": "details_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "risk_events_account_id_idx": {
+          "name": "risk_events_account_id_idx",
+          "columns": [
+            "account_id",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "risk_events_account_id_accounts_id_fk": {
+          "name": "risk_events_account_id_accounts_id_fk",
+          "tableFrom": "risk_events",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "risk_events_trade_id_trades_id_fk": {
+          "name": "risk_events_trade_id_trades_id_fk",
+          "tableFrom": "risk_events",
+          "tableTo": "trades",
+          "columnsFrom": [
+            "trade_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "risk_events_kind_check": {
+          "name": "risk_events_kind_check",
+          "value": "kind IN ('halt', 'reset', 'reset_refused', 'plan_refused', 'override', 'settings_change', 'settings_applied')"
+        },
+        "risk_events_halt_kind_check": {
+          "name": "risk_events_halt_kind_check",
+          "value": "halt_kind IS NULL OR halt_kind IN ('daily_loss', 'drawdown', 'manual')"
+        }
+      }
+    },
+    "risk_settings": {
+      "name": "risk_settings",
+      "columns": {
+        "account_id": {
+          "name": "account_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "settings_json": {
+          "name": "settings_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pending_json": {
+          "name": "pending_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "risk_settings_account_id_accounts_id_fk": {
+          "name": "risk_settings_account_id_accounts_id_fk",
+          "tableFrom": "risk_settings",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "risk_verdicts": {
+      "name": "risk_verdicts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "trade_id": {
+          "name": "trade_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "approved": {
+          "name": "approved",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "violation_codes": {
+          "name": "violation_codes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "warning_codes": {
+          "name": "warning_codes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshot_json": {
+          "name": "snapshot_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "override_reason": {
+          "name": "override_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "risk_verdicts_trade_id_idx": {
+          "name": "risk_verdicts_trade_id_idx",
+          "columns": [
+            "trade_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "risk_verdicts_trade_id_trades_id_fk": {
+          "name": "risk_verdicts_trade_id_trades_id_fk",
+          "tableFrom": "risk_verdicts",
+          "tableTo": "trades",
+          "columnsFrom": [
+            "trade_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "risk_verdicts_stage_check": {
+          "name": "risk_verdicts_stage_check",
+          "value": "stage IN ('created', 'opened')"
+        },
+        "risk_verdicts_approved_check": {
+          "name": "risk_verdicts_approved_check",
+          "value": "approved IN (0, 1)"
+        },
+        "risk_verdicts_override_check": {
+          "name": "risk_verdicts_override_check",
+          "value": "approved = 1 OR (override_reason IS NOT NULL AND length(override_reason) > 0)"
+        }
+      }
+    },
+    "setups": {
+      "name": "setups",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "setups_name_unique": {
+          "name": "setups_name_unique",
+          "columns": [
+            "name"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "trades": {
+      "name": "trades",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "setup_id": {
+          "name": "setup_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "symbol": {
+          "name": "symbol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "asset_class": {
+          "name": "asset_class",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "direction": {
+          "name": "direction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "planned_entry": {
+          "name": "planned_entry",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stop_loss": {
+          "name": "stop_loss",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "initial_stop_loss": {
+          "name": "initial_stop_loss",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "closed_recorded_at": {
+          "name": "closed_recorded_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "take_profit": {
+          "name": "take_profit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "size": {
+          "name": "size",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "quote_currency": {
+          "name": "quote_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entry_price": {
+          "name": "entry_price",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "exit_price": {
+          "name": "exit_price",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fees": {
+          "name": "fees",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'0'"
+        },
+        "fees_currency": {
+          "name": "fees_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "opened_at": {
+          "name": "opened_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "plan_notes": {
+          "name": "plan_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "review_notes": {
+          "name": "review_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "emotion": {
+          "name": "emotion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "screenshot_path": {
+          "name": "screenshot_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "trades_account_id_idx": {
+          "name": "trades_account_id_idx",
+          "columns": [
+            "account_id"
+          ],
+          "isUnique": false
+        },
+        "trades_status_idx": {
+          "name": "trades_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "trades_symbol_idx": {
+          "name": "trades_symbol_idx",
+          "columns": [
+            "symbol"
+          ],
+          "isUnique": false
+        },
+        "trades_opened_at_idx": {
+          "name": "trades_opened_at_idx",
+          "columns": [
+            "opened_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "trades_account_id_accounts_id_fk": {
+          "name": "trades_account_id_accounts_id_fk",
+          "tableFrom": "trades",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "trades_setup_id_setups_id_fk": {
+          "name": "trades_setup_id_setups_id_fk",
+          "tableFrom": "trades",
+          "tableTo": "setups",
+          "columnsFrom": [
+            "setup_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "trades_direction_check": {
+          "name": "trades_direction_check",
+          "value": "direction IN ('long', 'short')"
+        },
+        "trades_status_check": {
+          "name": "trades_status_check",
+          "value": "status IN ('planned', 'open', 'closed', 'cancelled')"
+        },
+        "trades_asset_class_check": {
+          "name": "trades_asset_class_check",
+          "value": "asset_class IN ('crypto', 'forex', 'stock', 'index', 'commodity', 'other')"
+        },
+        "trades_stop_loss_check": {
+          "name": "trades_stop_loss_check",
+          "value": "length(stop_loss) > 0"
+        },
+        "trades_entry_data_check": {
+          "name": "trades_entry_data_check",
+          "value": "status NOT IN ('open', 'closed') OR (entry_price IS NOT NULL AND opened_at IS NOT NULL)"
+        },
+        "trades_exit_data_check": {
+          "name": "trades_exit_data_check",
+          "value": "status <> 'closed' OR (exit_price IS NOT NULL AND closed_at IS NOT NULL)"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {
+      "risk_events_account_id_idx": {
+        "columns": {
+          "account_id": {
+            "isExpression": true
+          },
+          "id": {
+            "isExpression": true
+          }
+        }
+      },
+      "risk_verdicts_trade_id_idx": {
+        "columns": {
+          "trade_id": {
+            "isExpression": true
+          }
+        }
+      }
+    }
+  }
+}

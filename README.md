@@ -57,10 +57,21 @@ Open http://127.0.0.1:3000. If you forget `db:migrate`, the app tells you to run
    you actually trade in (USDT for `BTCUSDT`), otherwise you get no drawdown percentage. With fewer
    than 30 closed trades the page warns you that the numbers are not reliable.
 
+6. **Risk**: your safety rules, enforced by tested code. Set your limits, use the kill switch
+   ("Halt trading now"), see equity and today's figures, and use the position-size calculator.
+   Creating or opening a trade now shows a live risk verdict; a plan that breaks a rule is refused
+   with reasons. You can still log it with an **override** (type `OVERRIDE` and a reason), and it is
+   flagged forever. Closing a trade is never blocked. Every rule is explained in
+   [docs/risk-rules.md](docs/risk-rules.md). **Real orders will never have an override.**
+
 Prices and amounts are stored as exact decimal text (no rounding errors). Times you type are
 your computer's local time and are stored as UTC.
 
 ## Database and migrations
+
+After pulling module 3, run `npm run db:migrate` again: it adds the risk tables, gives every
+existing account the default risk settings and records a "recorded as closed" time for trades that
+are already closed.
 
 After pulling module 2, run `npm run db:migrate` once: it adds the frozen `initial_stop_loss` to your
 existing database and fills it for trades that are already open or closed.

@@ -1,3 +1,4 @@
+import type { TradePlan } from '@/domain/risk';
 import { localToUtc, orNull, orUndefined, toId, type FormValues } from '../_lib/form';
 
 /**
@@ -57,4 +58,30 @@ export const closeInputFromForm = (v: FormValues) => ({
   exitPrice: orUndefined(v.exitPrice),
   closedAt: localToUtc(v.closedAt),
   fees: orUndefined(v.fees),
+});
+
+/**
+ * The plan the risk engine judges, built from the raw form text. Anything blank becomes null so
+ * the engine refuses it ("fail closed") instead of guessing.
+ */
+export function planFromForm(v: FormValues): { accountId: number; plan: TradePlan } {
+  const open = v.status === 'open';
+  return {
+    accountId: toId(v.accountId) ?? 0,
+    plan: {
+      symbol: (v.symbol ?? '').trim().toUpperCase(),
+      direction: v.direction ?? '',
+      entry: orNull(open ? v.entryPrice : v.plannedEntry) ?? null,
+      stop: orNull(v.stopLoss) ?? null,
+      target: orNull(v.takeProfit) ?? null,
+      size: orNull(v.size) ?? null,
+      quoteCurrency: (v.quoteCurrency ?? '').trim().toUpperCase(),
+    },
+  };
+}
+
+/** The typed override confirmation and reason, if the user filled them in. */
+export const overrideFromForm = (v: FormValues) => ({
+  confirm: v.overrideConfirm ?? '',
+  reason: v.overrideReason ?? '',
 });

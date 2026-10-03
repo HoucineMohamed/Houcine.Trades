@@ -16,9 +16,19 @@ Modules are built in this order, each on its own branch with tests and small com
    funding); fees in another currency are flagged, not converted; drawdown percentage only exists
    for trades quoted in the account's base currency (set the base currency to the currency you
    trade in); R for trades that existed before the migration depends on a backfilled stop.
-3. **Risk engine**: position sizing, max risk, stop-loss validation (can reuse the initial-risk
-   idea from the stats engine). _Done when_: sizing is tested
-   against edge cases and rejects orders without a stop-loss.
+3. **Risk engine** - **DONE**: pure, tested rule engine that approves or refuses trade plans
+   (mandatory stop on the correct side, 1 % per trade, 3 % open risk, 3 open trades, reward-to-risk
+   warning, currency check, fail-closed), an exact position-size calculator (always rounded down),
+   a daily-loss halt, a drawdown halt (reset only after 24 h, typed confirmation and reason), a
+   manual kill switch, hard ceilings, settings that tighten at once and loosen after 24 h, an
+   append-only event log, a verdict snapshot on every trade, a typed-override journal gate, and a
+   `/risk` page plus a live verdict in the new-trade form. Plain-language rules in
+   `docs/risk-rules.md`. _Done when_: a plan that breaks a limit is refused with reasons, sizing is
+   exact, the kill switch works, tests pass (they do). Carried forward: unrealised P&L is not
+   counted (needs live prices); no currency conversion; override trades are flagged but not yet
+   separated in the stats (proposal in `docs/risk-rules.md`: a `ruleOverride` field and a "By rule
+   compliance" breakdown); repeated drawdown resets are possible by design (each is logged);
+   closed times are typed by you (the recorded time covers backdating).
 4. **Authentication**: single-owner login. Must exist before any hosting. _Done when_: every
    route and API is protected.
 5. **Dashboard UI**: journal and stats views. _Done when_: owner can use it daily locally.
@@ -27,7 +37,8 @@ Modules are built in this order, each on its own branch with tests and small com
 7. **Notifications**: alerts for risk limits and events.
 8. **24/7 deployment and backups**: hosting (persistent disk for SQLite), HTTPS, automated
    encrypted backups, restore test.
-9. **Exchange adapter (testnet)** with confirm button and kill switch: every order needs explicit
+9. **Exchange adapter (testnet)** with confirm button and kill switch (**no override: orders must pass
+   `requireApprovedForExecution`**): every order needs explicit
    confirmation and a stop-loss. Keys are trade-only with withdrawals disabled.
 10. **Bots framework**: paper mode by default, same risk and confirmation gates.
 11. **Knowledge base and connector registry**.

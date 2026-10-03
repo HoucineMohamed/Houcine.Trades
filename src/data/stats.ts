@@ -1,7 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import type { StatsInput } from '@/domain/stats';
 import { getAccount } from './accounts';
-import type { Db } from './client';
+import type { Reader } from './client';
 import { NotFoundError } from './errors';
 import { setups, trades } from './schema';
 
@@ -10,7 +10,7 @@ import { setups, trades } from './schema';
  * CLOSED trades, as plain objects. There is deliberately no calculation here (project rule 3):
  * all maths lives in src/domain/stats.
  */
-export function loadStatsInput(db: Db, accountId: number): StatsInput {
+export function loadStatsInput(db: Reader, accountId: number): StatsInput {
   const account = getAccount(db, accountId);
   if (!account) throw new NotFoundError(`Account ${accountId}`);
 
