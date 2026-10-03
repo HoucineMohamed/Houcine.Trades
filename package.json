@@ -18,7 +18,9 @@
     "format:check": "prettier --check .",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "auth:generate-secret": "node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\""
+    "auth:generate-secret": "node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\"",
+    "auth:create-owner": "tsx --conditions=react-server scripts/auth/create-owner.ts",
+    "auth:reset": "tsx --conditions=react-server scripts/auth/reset.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",
