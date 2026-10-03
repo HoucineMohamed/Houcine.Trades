@@ -22,6 +22,13 @@
       "when": 1791056248887,
       "tag": "0002_risk_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791068522339,
+      "tag": "0003_auth",
+      "breakpoints": true
     }
   ]
 }
