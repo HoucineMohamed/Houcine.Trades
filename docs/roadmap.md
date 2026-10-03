@@ -35,5 +35,7 @@ Modules are built in this order, each on its own branch with tests and small com
   before module 9.
 - Turn on GitHub branch protection for the default branch (PRs required, CI required) to enforce
   rule 7.
-- Known: `npm audit` reports a dev-only advisory (`braces`, via `eslint-config-next`). It affects
-  lint tooling only, not runtime. Re-check when dependencies are updated.
+- Known: `npm audit` reports dev-only advisories (`braces` via `eslint-config-next`, and an old
+  `esbuild` inside `drizzle-kit`'s legacy loader). They affect lint and migration tooling on the
+  developer's machine only; `npm audit --omit=dev` (what the running app uses) reports 0. Re-check
+  when dependencies are updated.
