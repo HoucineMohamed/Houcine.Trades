@@ -48,6 +48,8 @@ export const trades = sqliteTable(
     plannedEntry: text('planned_entry').notNull(),
     // Project rule 4: a stop-loss is mandatory on every trade (NOT NULL, and never empty).
     stopLoss: text('stop_loss').notNull(),
+    // Frozen copy of the stop when the trade opened (see the triggers in the migration). R uses it.
+    initialStopLoss: text('initial_stop_loss'),
     takeProfit: text('take_profit'),
     size: text('size').notNull(),
     quoteCurrency: text('quote_currency').notNull(),

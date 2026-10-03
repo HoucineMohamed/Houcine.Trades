@@ -11,8 +11,13 @@ const account = { name: 'Paper main', baseCurrency: 'usd', startingBalance: '100
 describe('test database safety', () => {
   it('uses memory only: no database file is created', () => {
     memoryDb();
-    expect(fs.existsSync('data')).toBe(false);
-    expect(fs.readdirSync('.').filter((f) => /\.(db|sqlite3?)(-wal|-shm)?$/.test(f))).toEqual([]);
+    // (The data/ folder itself may exist because the db:* commands create it; no files may.)
+    const dbFiles = (dir: string) =>
+      fs.existsSync(dir)
+        ? fs.readdirSync(dir).filter((f) => /\.(db|sqlite3?)(-wal|-shm)?$/.test(f))
+        : [];
+    expect(dbFiles('data')).toEqual([]);
+    expect(dbFiles('.')).toEqual([]);
   });
 });
 

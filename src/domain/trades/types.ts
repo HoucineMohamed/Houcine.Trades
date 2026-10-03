@@ -19,6 +19,12 @@ export interface TradeFields {
   status: TradeStatus;
   plannedEntry: string;
   stopLoss: string;
+  /**
+   * The stop-loss the trade STARTED with. Null while planned or cancelled; set once when the
+   * trade becomes open (or is created open) and never changed afterwards. R-multiples use this,
+   * not `stopLoss`, which may be moved while the trade is open.
+   */
+  initialStopLoss: string | null;
   takeProfit: string | null;
   size: string;
   quoteCurrency: string;

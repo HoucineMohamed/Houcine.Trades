@@ -161,6 +161,7 @@ export default async function TradesPage({
               <th>Setup</th>
               <th>Planned entry</th>
               <th>Stop-loss</th>
+              <th>Initial stop</th>
               <th>Take-profit</th>
               <th>Size</th>
               <th>Entry</th>
@@ -183,6 +184,7 @@ export default async function TradesPage({
                 <td>{t.setupId === null ? '' : setupNames.get(t.setupId)}</td>
                 <td>{t.plannedEntry}</td>
                 <td>{t.stopLoss}</td>
+                <td>{t.initialStopLoss}</td>
                 <td>{t.takeProfit}</td>
                 <td>{t.size}</td>
                 <td>{t.entryPrice}</td>

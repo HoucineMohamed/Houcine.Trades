@@ -7,9 +7,17 @@ Modules are built in this order, each on its own branch with tests and small com
    when_: trades can be logged, listed and closed, with tests. Carried forward: trades in
    different quote currencies cannot be added together without conversion, so the stats engine
    must group by currency; the UI has no login (module 4) and must stay on localhost.
-2. **Stats engine**: win rate, expectancy, drawdown, etc. as pure functions. _Done when_: stats
-   match hand-computed fixtures.
-3. **Risk engine**: position sizing, max risk, stop-loss validation. _Done when_: sizing is tested
+2. **Stats engine** - **DONE**: pure, tested statistics per account and per quote currency (win
+   rate, R-multiples, expectancy, profit factor, payoff ratio, streaks, max drawdown, equity curve,
+   breakdowns by setup, symbol, direction and asset class) and a plain `/stats` page. Added a
+   frozen `initial_stop_loss` so R stays honest. _Done when_: stats match hand-computed fixtures
+   (they do; see `src/domain/stats/golden.test.ts`). Plain-language definitions are in
+   `docs/stats-glossary.md`. Carried forward: spot-style P&L only (no leverage, multipliers or
+   funding); fees in another currency are flagged, not converted; drawdown percentage only exists
+   for trades quoted in the account's base currency (set the base currency to the currency you
+   trade in); R for trades that existed before the migration depends on a backfilled stop.
+3. **Risk engine**: position sizing, max risk, stop-loss validation (can reuse the initial-risk
+   idea from the stats engine). _Done when_: sizing is tested
    against edge cases and rejects orders without a stop-loss.
 4. **Authentication**: single-owner login. Must exist before any hosting. _Done when_: every
    route and API is protected.

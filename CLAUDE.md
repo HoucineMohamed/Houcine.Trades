@@ -5,9 +5,10 @@ Private, single-owner financial workspace for Houcine: trading journal and stats
 It will run online 24/7 later. The owner is a trading beginner, so **correctness and safety matter
 more than speed**. Built module by module (see `docs/roadmap.md`).
 
-Status: module 1 (data model and journal) is built: accounts, setups and trades in SQLite, pure
-validation, repositories, and a minimal functional UI. No stats, risk engine, auth or
-integrations yet.
+Status: modules 1 (data model and journal) and 2 (stats engine) are built: accounts, setups and
+trades in SQLite, pure validation, repositories, a minimal functional UI, a pure stats engine and a
+plain `/stats` page. No risk engine, auth or integrations yet. Every statistic is explained in
+`docs/stats-glossary.md`.
 
 > **WARNING: there is no authentication yet (module 4).** The app must only run on localhost
 > (`dev` and `start` bind to 127.0.0.1) and must NOT be deployed or exposed to a network until
@@ -22,7 +23,7 @@ Next.js (App Router) + TypeScript (strict, `noUncheckedIndexedAccess`), SQLite v
 
 - `src/app/` UI and routes only
 - `src/domain/` pure logic (no I/O; ESLint enforces it): `money/` (decimal.js helper), `trades/`
-  (validation, lifecycle), `accounts/`, `setups/`, and later `risk/`, `stats/`
+  (validation, lifecycle), `accounts/`, `setups/`, `stats/` (pure stats engine), and later `risk/`
 - `src/data/` database access: `schema.ts`, `client.ts`, repositories (`accounts`, `setups`, `trades`)
 - `drizzle/` committed SQL migrations (generated, do not edit by hand)
 - `src/integrations/` `tradingview-mcp/`, `exchanges/` (future adapters)
@@ -74,6 +75,16 @@ Before every commit: lint, typecheck and tests must pass.
   side, size and prices > 0, allowed status moves, locks after close). Repositories always call
   them before writing; do not bypass them. Tests for repositories use in-memory SQLite and must
   never create a database file.
+- Stats rules (module 2): all statistics are computed only in `src/domain/stats/`; the data layer
+  (`src/data/stats.ts`) only loads plain objects and the UI only displays results. Currencies are
+  never added together or converted: everything is computed per quote currency. R-multiples use
+  `initialStopLoss` (frozen when the trade opens), NEVER the editable `stopLoss`. The word "gross"
+  always means "before fees"; the sums of winning and losing trades are called "total winners" and
+  "total losers" (measured after fees). Numbers that cannot be computed are `null` with a reason,
+  never zero and never a crash. Assumption: spot-style P&L (no leverage, multipliers or funding).
+- Hand-written SQL in a migration (the triggers that protect `initial_stop_loss`, in
+  `drizzle/0001_initial_stop_loss.sql`) is not tracked by drizzle-kit. A future migration that
+  rebuilds the `trades` table must re-create them; a test fails if they are missing.
 - Schema changes: edit `src/data/schema.ts`, run `npm run db:generate`, commit the new file in
   `drizzle/`. CI fails if the schema and migrations disagree.
 - Timestamps are UTC ISO strings in the database. The UI converts from and to the computer's local

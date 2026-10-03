@@ -39,6 +39,7 @@ export function findTradeIssues(t: TradeFields): ValidationIssue[] {
   };
   checkPositive('plannedEntry', 'Planned entry', t.plannedEntry, true);
   checkPositive('stopLoss', 'Stop-loss', t.stopLoss, true);
+  checkPositive('initialStopLoss', 'Initial stop-loss', t.initialStopLoss, false);
   checkPositive('takeProfit', 'Take-profit', t.takeProfit, false);
   checkPositive('size', 'Size', t.size, true);
   checkPositive('entryPrice', 'Entry price', t.entryPrice, false);
@@ -61,6 +62,22 @@ export function findTradeIssues(t: TradeFields): ValidationIssue[] {
       add(
         'stopLoss',
         `For a short trade the stop-loss (${t.stopLoss}) must be above the ${entryField} (${entry})`,
+      );
+    }
+  }
+  // The initial stop only exists once the trade is open, so it is judged against the real entry.
+  if (t.entryPrice !== null && goodPrice.entryPrice && goodPrice.initialStopLoss) {
+    const initialVsEntry = compareDecimal(t.initialStopLoss as string, t.entryPrice);
+    if (t.direction === 'long' && initialVsEntry >= 0) {
+      add(
+        'initialStopLoss',
+        `For a long trade the initial stop-loss (${t.initialStopLoss}) must be below the entry price (${t.entryPrice})`,
+      );
+    }
+    if (t.direction === 'short' && initialVsEntry <= 0) {
+      add(
+        'initialStopLoss',
+        `For a short trade the initial stop-loss (${t.initialStopLoss}) must be above the entry price (${t.entryPrice})`,
       );
     }
   }
@@ -94,14 +111,17 @@ export function findTradeIssues(t: TradeFields): ValidationIssue[] {
       mustBeEmpty('openedAt', 'Opened time');
       mustBeEmpty('exitPrice', 'Exit price');
       mustBeEmpty('closedAt', 'Closed time');
+      mustBeEmpty('initialStopLoss', 'Initial stop-loss');
       break;
     case 'open':
+      mustExist('initialStopLoss', 'Initial stop-loss');
       mustExist('entryPrice', 'Entry price');
       mustExist('openedAt', 'Opened time');
       mustBeEmpty('exitPrice', 'Exit price');
       mustBeEmpty('closedAt', 'Closed time');
       break;
     case 'closed':
+      mustExist('initialStopLoss', 'Initial stop-loss');
       mustExist('entryPrice', 'Entry price');
       mustExist('openedAt', 'Opened time');
       mustExist('exitPrice', 'Exit price');
