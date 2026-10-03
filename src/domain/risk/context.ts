@@ -9,6 +9,7 @@ import {
   type RiskSettings,
 } from './settings';
 import { DAY_MS, isInUtcDay, nextUtcMidnight, utcDayStart } from './time';
+import type { HaltKind, RiskEventKind } from './kinds';
 import type { OpenTradeRisk } from './types';
 
 /**
@@ -20,18 +21,8 @@ import type { OpenTradeRisk } from './types';
  * currency.
  */
 
-export type HaltKind = 'daily_loss' | 'drawdown' | 'manual';
-
-export const RISK_EVENT_KINDS = [
-  'halt',
-  'reset',
-  'reset_refused',
-  'plan_refused',
-  'override',
-  'settings_change',
-  'settings_applied',
-] as const;
-export type RiskEventKind = (typeof RISK_EVENT_KINDS)[number];
+export { RISK_EVENT_KINDS, HALT_KINDS } from './kinds';
+export type { HaltKind, RiskEventKind } from './kinds';
 
 export interface RiskEventRecord {
   id: number;

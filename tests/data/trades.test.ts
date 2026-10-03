@@ -288,7 +288,7 @@ describe('database-level safety nets (behind the domain rules)', () => {
     // `initial` is the initial_stop_loss SQL value; give it so the entry/exit CHECKs are reached.
     const base = (status: string, direction: string, assetClass: string, initial = "'0.5'") =>
       db.$client.prepare(
-        `INSERT INTO trades (account_id, symbol, asset_class, direction, status, planned_entry, stop_loss, initial_stop_loss, size, quote_currency, fees_currency, created_at, updated_at) VALUES (1,'X','${assetClass}','${direction}','${status}','1','0.5',${initial},'1','USD','USD','t','t')`,
+        `INSERT INTO trades (account_id, symbol, asset_class, direction, status, planned_entry, stop_loss, initial_stop_loss, closed_recorded_at, size, quote_currency, fees_currency, created_at, updated_at) VALUES (1,'X','${assetClass}','${direction}','${status}','1','0.5',${initial},'t','1','USD','USD','t','t')`,
       );
     expect(() => base('planned', 'sideways', 'crypto').run()).toThrow(/CHECK/);
     expect(() => base('won', 'long', 'crypto').run()).toThrow(/CHECK/);
