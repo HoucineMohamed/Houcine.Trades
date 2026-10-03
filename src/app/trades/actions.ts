@@ -1,26 +1,74 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { cancelTrade, closeTrade, createTrade, openTrade, updateTrade } from '@/data/trades';
+import { evaluatePlanForAccount } from '@/data/risk';
+import { closeTradeAndSync, logTrade, openTradeChecked, RiskRefusalError } from '@/data/journal';
+import { cancelTrade, updateTrade } from '@/data/trades';
+import type { VerdictNumbers } from '@/domain/risk';
 import { requireDb } from '../_lib/db';
-import { errorMessages, formValues, toId, type FormState } from '../_lib/form';
+import { errorMessages, formValues, toId, type FormState, type FormValues } from '../_lib/form';
 import {
   closeInputFromForm,
   createInputFromForm,
   editPatchFromForm,
   openInputFromForm,
+  overrideFromForm,
+  planFromForm,
 } from './mapping';
 
 const ok = (message: string) => '/trades?ok=' + encodeURIComponent(message);
 const failed = (error: unknown) =>
-  '/trades?error=' + encodeURIComponent(errorMessages(error).join(' | '));
+  '/trades?error=' + encodeURIComponent(refusalOrMessages(error).join(' | '));
 
-/** Create form: on error the form is shown again with what the user typed. */
+/** The risk engine's refusal as plain messages (all of them), or the usual validation messages. */
+function refusalOrMessages(error: unknown): string[] {
+  if (error instanceof RiskRefusalError) return error.verdict.violations.map((v) => v.message);
+  return errorMessages(error);
+}
+
+export interface RiskPreview {
+  approved: boolean;
+  violations: { code: string; message: string }[];
+  warnings: { code: string; message: string }[];
+  numbers: VerdictNumbers;
+}
+
+/**
+ * Live risk verdict for the plan in the form. READ ONLY: it saves nothing. The same engine and
+ * the same rules that will judge the real submission.
+ */
+export async function previewRiskAction(values: FormValues): Promise<RiskPreview> {
+  const { accountId, plan } = planFromForm(values);
+  const { verdict } = evaluatePlanForAccount(await requireDb(), accountId, plan);
+  return {
+    approved: verdict.approved,
+    violations: verdict.violations,
+    warnings: verdict.warnings,
+    numbers: verdict.numbers,
+  };
+}
+
+/**
+ * Create form: the plan goes through the risk engine. If it is refused, the form is shown again
+ * with every reason and the override fields (type OVERRIDE and a reason to log it anyway).
+ */
 export async function createTradeAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const values = formValues(formData);
   try {
-    createTrade(await requireDb(), createInputFromForm(values));
+    logTrade(await requireDb(), createInputFromForm(values), {
+      override: overrideFromForm(values),
+    });
   } catch (error) {
+    if (error instanceof RiskRefusalError) {
+      return {
+        errors: [
+          'The risk engine refused this plan:',
+          ...error.verdict.violations.map((v) => v.message),
+        ],
+        values,
+        needsOverride: true,
+      };
+    }
     return { errors: errorMessages(error), values };
   }
   redirect(ok('Trade created'));
@@ -45,7 +93,9 @@ export async function openTradeAction(formData: FormData) {
   const v = formValues(formData);
   let target: string;
   try {
-    openTrade(await requireDb(), toId(v.id) ?? -1, openInputFromForm(v));
+    openTradeChecked(await requireDb(), toId(v.id) ?? -1, openInputFromForm(v), {
+      override: overrideFromForm(v),
+    });
     target = ok('Trade opened');
   } catch (error) {
     target = failed(error);
@@ -53,11 +103,12 @@ export async function openTradeAction(formData: FormData) {
   redirect(target);
 }
 
+/** Closing is never blocked by risk rules (it only reduces risk). */
 export async function closeTradeAction(formData: FormData) {
   const v = formValues(formData);
   let target: string;
   try {
-    closeTrade(await requireDb(), toId(v.id) ?? -1, closeInputFromForm(v));
+    closeTradeAndSync(await requireDb(), toId(v.id) ?? -1, closeInputFromForm(v));
     target = ok('Trade closed');
   } catch (error) {
     target = failed(error);
