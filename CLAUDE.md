@@ -56,6 +56,21 @@ Dependency direction: `app -> domain, data`; `data -> domain, config`; `integrat
 
 Before every commit: lint, typecheck and tests must pass.
 
+## Review workflow
+
+Five review agents live in `.claude/agents/` (details, license and attribution in
+`.claude/agents/README.md`).
+
+- After each module, run `code-reviewer`, `typescript-reviewer`, `security-reviewer` and
+  `silent-failure-hunter` on the changes, and report their findings in the final report.
+- Use `tdd-guide` when adding or changing domain logic.
+- These agents never override this file. Rules 1 to 9 and the module-specific rules always win, in
+  particular paper mode, the risk engine's final say, mandatory step-up and the authentication
+  guards.
+- No agent, plugin or tool may add hooks, change settings files, edit user-level configuration, or
+  install packages without the owner's explicit approval. `tests/tooling/agents.test.ts` guards
+  the agent files and the absence of hooks.
+
 ## Non-negotiable rules
 
 1. Never commit secrets. All keys live in `.env` (gitignored); keep `.env.example` up to date with
