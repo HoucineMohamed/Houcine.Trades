@@ -38,8 +38,7 @@ Modules are built in this order, each on its own branch with tests and small com
    on every page, action and route handler enforced by tests; Origin/Host CSRF check, nonce-based CSP
    and security headers; progressive rate limiting kept in SQLite; append-only `auth_events`. Plain
    language in `docs/security.md`. _Done when_: every route and API is protected (it is, and a test
-   proves it). Carried forward: gitleaks in CI is **not yet added** because its release checksum could
-   not be verified (see below); the app still binds to 127.0.0.1 and hosting needs module 8
+   proves it). Carried forward: the app still binds to 127.0.0.1 and hosting needs module 8
    (HTTPS, `TRUST_PROXY`, backups of the database and of `AUTH_SECRET`).
 5. **Dashboard UI**: journal and stats views. _Done when_: owner can use it daily locally.
 6. **Claude analyst and TradingView MCP**: AI analysis; the AI never does the math. Vet the MCP
@@ -60,11 +59,10 @@ Modules are built in this order, each on its own branch with tests and small com
   `TRUST_PROXY`, backups, `AUTH_SECRET`).
 - **Backups (module 8):** until then the SQLite file in `data/` is the only copy of the journal.
   Copy `data/houcine-trades.db` (with the app stopped) if the data matters.
-- **Secret scanning:** a built-in test (`tests/security/secret-scan.test.ts`), `.gitleaks.toml` and an
-  optional pre-commit hook exist. The **gitleaks CI step is still missing** (its release checksum
-  could not be verified, so nothing unverified was pinned): finish it as described in
-  `docs/security.md` **before any real API key is used**, at the latest before module 6
-  (Claude/TradingView keys) and certainly before module 9.
+- **Secret scanning:** gitleaks runs in CI (`secret-scan` job), next to a built-in test
+  (`tests/security/secret-scan.test.ts`) and an optional pre-commit hook. **It must be green before
+  any real API key is used**, at the latest before module 6 (Claude/TradingView keys) and
+  certainly before module 9.
 - **Module 9 must require `FreshAuth`** (and `requireApprovedForExecution`) for anything that can
   place an order.
 - Turn on GitHub branch protection for the default branch (PRs required, CI required) to enforce

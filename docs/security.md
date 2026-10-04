@@ -77,25 +77,29 @@ from the same project).
 | `server-only` 0.0.1                                 | makes importing server code into the browser a build error |
 | `tsx` 4.23.15 (dev)                                 | runs the command-line scripts                              |
 
-## gitleaks (status: NOT yet in CI)
+## gitleaks (secret scanning in CI)
 
-The plan was to run the official gitleaks command-line program (MIT) in CI, pinned to a version
-with its release checksum verified. The build environment used for this module could not reach the
-GitHub release page, so the checksum **could not be verified** and, as agreed, the CI step was
-**not added** rather than pin something unverified. What exists today:
+CI has a `secret-scan` job (`.github/workflows/ci.yml`). It installs the official gitleaks program
+(MIT) with `go install`, pinned to the exact version **v8.30.1**, using `actions/setup-go`. Go's
+checksum database verifies the module and stays enabled. It then scans the whole git history with
+`.gitleaks.toml` and fails on any finding.
 
-- `tests/security/secret-scan.test.ts`: runs on every `npm test` (and so in CI), scans tracked
-  files for private keys, cloud/GitHub/Slack/Anthropic-style keys, JWTs and secret-looking
-  assignments. The only exceptions are the `.env.example` placeholder and the public RFC 6238 test
-  secret. Its own detector is tested with deliberately fake secrets.
-- `.gitleaks.toml`: the matching gitleaks configuration (same two exceptions only).
+Note on the module path: gitleaks lives under the `gitleaks` GitHub organization, but its `go.mod`
+for v8.30.1 still declares the old path `github.com/zricethezav/gitleaks/v8`, so Go refuses
+`go install github.com/gitleaks/gitleaks/v8@v8.30.1`. The job therefore uses the old path, which
+serves the same code at the same version.
+
+Other protections that exist alongside it:
+
+- `tests/security/secret-scan.test.ts`: runs on every `npm test`, scans tracked files for private
+  keys, cloud/GitHub/Slack/Anthropic-style keys, JWTs and secret-looking assignments. Its own
+  detector is tested with deliberately fake secrets.
+- `.gitleaks.toml`: the only exceptions are the `.env.example` placeholder and the public RFC 6238
+  test secret (in the two test files that mention it).
 - `.githooks/pre-commit` (optional): runs gitleaks on staged changes if you have it installed.
   Enable once with `git config core.hooksPath .githooks`. It never installs anything.
 
-To finish the CI step: download the release you choose from the gitleaks releases page, check its
-SHA-256 against the `checksums.txt` published with it (ideally also verify the signed provenance),
-and put that exact version and checksum in the workflow. This must be done before any real API key
-is used (roadmap).
+**The job must be green before any real API key is used** (roadmap).
 
 ## What module 8 (hosting) must do
 

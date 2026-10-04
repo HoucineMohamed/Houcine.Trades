@@ -6,7 +6,7 @@ title = "Houcine.Trades"
 useDefault = true
 
 # Allowlisted: (1) the exact placeholder in .env.example, (2) the public RFC 6238 test secret used
-# by the TOTP tests. Nothing else is exempt, and no file is allowlisted by path alone.
+# by the TOTP tests and the secret-scan test. Nothing else is exempt, and no file is allowlisted by path alone.
 [[allowlists]]
 description = "Placeholder values in .env.example"
 condition = "AND"
@@ -18,5 +18,5 @@ regexes = [
 [[allowlists]]
 description = "Public RFC 6238 Appendix B test secret"
 condition = "AND"
-paths = ['''^src/auth/totp\.test\.ts$''']
+paths = ['''^(src/auth/totp\.test\.ts|tests/security/secret-scan\.test\.ts)$''']
 regexes = ['''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''']
