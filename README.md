@@ -1,14 +1,15 @@
 # Houcine.Trades
 
 Private trading workspace for one user: journal, stats, risk engine, AI analyst, and later
-bots. **Module 1 (journal) is built**: you can log paper trades, list them, edit them and close
-them. Everything runs in **paper mode**.
+bots. **Modules 1 to 4 are built**: journal, stats, risk engine and **single-owner login**
+(password + authenticator code). Everything runs in **paper mode**.
 
-> ## ⚠️ LOCALHOST ONLY - NO LOGIN YET
+> ## Login exists, but hosting does not
 >
-> The app has **no authentication** until module 4. Run it only on your own computer
-> (`npm run dev` and `npm start` listen on 127.0.0.1 only). **Do not deploy it, do not expose it
-> to a network, and do not change the host setting** until authentication exists. Read `CLAUDE.md` for the rules and `docs/` for architecture and roadmap.
+> Every page needs your login. The app still listens on 127.0.0.1 only (your own computer).
+> **Do not change the host setting or deploy it** until module 8 (HTTPS, backups): read
+> [docs/security.md](docs/security.md) first. Read `CLAUDE.md` for the rules and `docs/` for
+> architecture and roadmap.
 
 ## Requirements
 
@@ -35,11 +36,39 @@ git clone <repo-url>
 cd Houcine.Trades
 npm install
 cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
+npm run auth:generate-secret   # prints a long random text: paste it as AUTH_SECRET in .env
 npm run db:migrate          # creates the database file in data/ (once, and after new migrations)
+npm run auth:create-owner   # creates YOU as the only user (see below)
 npm run dev
 ```
 
-Open http://127.0.0.1:3000. If you forget `db:migrate`, the app tells you to run it.
+Open http://127.0.0.1:3000 and sign in. If you forget `db:migrate`, the app tells you to run it.
+
+### Create the owner (once)
+
+You need an authenticator app on your phone (for example Google Authenticator, Microsoft
+Authenticator, Aegis or 1Password).
+
+1. Run `npm run auth:generate-secret`. It prints one long line of random characters.
+2. Open the file `.env` (created from `.env.example`). Replace the text after `AUTH_SECRET=` with
+   that line. Save. **Keep a private copy of it** (a password manager); never share it or commit
+   it. `.env` is ignored by git.
+3. Run `npm run db:migrate`.
+4. Run `npm run auth:create-owner` in a **real terminal window** (not a pipe or an editor
+   console). It asks for your new password twice. You will not see it while typing; that is
+   normal. Use at least 12 characters, for example four or five unrelated words.
+5. The screen then shows a **QR code**, a text secret and **10 recovery codes**. In your
+   authenticator app choose "add account", scan the QR code (or type the secret). Write the
+   recovery codes down on paper or store them in a password manager. **They are shown only once.**
+6. Press Enter when asked: the screen is cleared so the codes do not stay visible.
+7. Start the app (`npm run dev`) and sign in with your password and the 6-digit code.
+
+Only one owner can ever exist. If you lose your password or phone: sign in with a recovery
+code (each works once), or run `npm run auth:reset` in the terminal on the same computer (it asks
+you to type `RESET`, then sets a new password and authenticator and ends every session). The
+`/security` page lets you change the password, make new recovery codes, see recent sign-in
+activity and sign out everywhere. Sensitive actions ask for a fresh authenticator code. All of this
+is explained in [docs/security.md](docs/security.md).
 
 ## Using the journal
 
@@ -73,6 +102,10 @@ After pulling module 3, run `npm run db:migrate` again: it adds the risk tables,
 existing account the default risk settings and records a "recorded as closed" time for trades that
 are already closed.
 
+After pulling module 4, run `npm run db:migrate` again (it adds the login tables), set `AUTH_SECRET`
+in `.env` and create the owner (see "Create the owner" above). Until you do, the login page tells
+you sign-in is not set up and nobody can use the app.
+
 After pulling module 2, run `npm run db:migrate` once: it adds the frozen `initial_stop_loss` to your
 existing database and fills it for trades that are already open or closed.
 
@@ -89,20 +122,23 @@ CI fails if the schema changed without a committed migration.
 
 ## Commands
 
-| Command               | What it does                             |
-| --------------------- | ---------------------------------------- |
-| `npm run dev`         | dev server                               |
-| `npm test`            | run tests once                           |
-| `npm run lint`        | ESLint                                   |
-| `npm run typecheck`   | TypeScript check                         |
-| `npm run format`      | Prettier                                 |
-| `npm run build`       | production build                         |
-| `npm run db:migrate`  | apply database migrations                |
-| `npm run db:generate` | create a migration after a schema change |
+| Command                        | What it does                                                   |
+| ------------------------------ | -------------------------------------------------------------- |
+| `npm run dev`                  | dev server                                                     |
+| `npm test`                     | run tests once                                                 |
+| `npm run lint`                 | ESLint                                                         |
+| `npm run typecheck`            | TypeScript check                                               |
+| `npm run format`               | Prettier                                                       |
+| `npm run build`                | production build                                               |
+| `npm run db:migrate`           | apply database migrations                                      |
+| `npm run db:generate`          | create a migration after a schema change                       |
+| `npm run auth:generate-secret` | print a random `AUTH_SECRET`                                   |
+| `npm run auth:create-owner`    | create the one owner (password, authenticator, recovery codes) |
+| `npm run auth:reset`           | reset the owner's password and authenticator                   |
 
 ## Safety notes
 
-- Never commit `.env`; only `.env.example` (placeholders) is tracked. The database (`data/`) is gitignored.
+- Never commit `.env`; only `.env.example` (placeholders) is tracked. The database (`data/`) is gitignored. A test scans for secrets on every `npm test`; an optional gitleaks pre-commit hook is described in [docs/security.md](docs/security.md).
 - Exchange API keys, when added, must be **trade-only with withdrawals disabled**.
 - There is no real order execution. `TRADING_MODE` must be `paper`.
 - Work on a branch and merge by pull request. On GitHub: Settings -> Branches -> add a rule for

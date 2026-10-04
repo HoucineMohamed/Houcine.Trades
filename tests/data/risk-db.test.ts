@@ -6,6 +6,30 @@ import { closeTrade, createTrade, getTrade, updateTrade } from '@/data/trades';
 import { listRiskEvents } from '@/data/risk-events';
 import { closedTrade, riskDb } from '../helpers/risk';
 
+/** Every trigger created by the hand-written parts of the migrations (0001, 0002, 0003). */
+export const ALL_TRIGGERS = [
+  'auth_events_no_delete',
+  'auth_events_no_update',
+  'owner_id_frozen',
+  'owner_no_delete',
+  'recovery_codes_hash_frozen',
+  'recovery_codes_no_delete',
+  'recovery_codes_use_final',
+  'risk_events_no_delete',
+  'risk_events_no_update',
+  'risk_verdicts_no_delete',
+  'risk_verdicts_no_update',
+  'sessions_identity_frozen',
+  'sessions_no_delete',
+  'sessions_revocation_final',
+  'trades_closed_recorded_frozen',
+  'trades_closed_recorded_required_insert',
+  'trades_closed_recorded_required_update',
+  'trades_initial_stop_frozen',
+  'trades_initial_stop_required_insert',
+  'trades_initial_stop_required_update',
+].sort();
+
 describe('every account is born with default risk settings', () => {
   it('creates the settings row and logs it', () => {
     const db = riskDb();
@@ -100,18 +124,7 @@ describe('recorded-as-closed time', () => {
     )
       .map((r) => r.name)
       .sort();
-    expect(names).toEqual([
-      'risk_events_no_delete',
-      'risk_events_no_update',
-      'risk_verdicts_no_delete',
-      'risk_verdicts_no_update',
-      'trades_closed_recorded_frozen',
-      'trades_closed_recorded_required_insert',
-      'trades_closed_recorded_required_update',
-      'trades_initial_stop_frozen',
-      'trades_initial_stop_required_insert',
-      'trades_initial_stop_required_update',
-    ]);
+    expect(names).toEqual(ALL_TRIGGERS);
   });
 });
 

@@ -56,4 +56,4 @@ export function getDb(): Db {
 export type Reader = Pick<Db, 'select'>;
 
 /** Anything that can read and write: the database itself or a transaction inside it. */
-export type Writer = Pick<Db, 'select' | 'insert' | 'update'>;
+export type Writer = Pick<Db, 'select' | 'insert' | 'update' | 'delete'>;

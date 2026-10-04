@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 // Relative imports on purpose: drizzle-kit loads this file without the "@/" alias.
 import { ACCOUNT_MODES } from '../domain/accounts/account';
+import { ATTEMPT_KINDS, AUTH_EVENT_KINDS } from '../domain/auth/kinds';
 import { HALT_KINDS, RISK_EVENT_KINDS, VERDICT_STAGES } from '../domain/risk/kinds';
 import { ASSET_CLASSES, DIRECTIONS, STATUSES } from '../domain/trades/types';
 
@@ -166,3 +167,96 @@ export const riskVerdicts = sqliteTable(
 export type RiskSettingsRow = typeof riskSettings.$inferSelect;
 export type RiskEventRow = typeof riskEvents.$inferSelect;
 export type RiskVerdictRow = typeof riskVerdicts.$inferSelect;
+
+// ---------------------------------------------------------------------------------------------
+// Authentication (module 4). See docs/security.md.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The single owner. `id` is always 1 (CHECK), so a second owner is impossible; a trigger also
+ * forbids deleting the row. The only way to create or reset it is the command-line scripts.
+ */
+export const owner = sqliteTable(
+  'owner',
+  {
+    id: integer('id').primaryKey(),
+    /** argon2id hash. */
+    passwordHash: text('password_hash').notNull(),
+    /** AES-256-GCM blob (key derived from AUTH_SECRET). */
+    totpSecretEnc: text('totp_secret_enc').notNull(),
+    /** Newest authenticator time step ever accepted (replay protection). */
+    totpLastStep: integer('totp_last_step'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    passwordChangedAt: text('password_changed_at').notNull(),
+  },
+  () => [check('owner_single_row_check', sql.raw('id = 1'))],
+);
+
+/** One-time recovery codes. Only a SHA-256 hash is stored. */
+export const recoveryCodes = sqliteTable('recovery_codes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  codeHash: text('code_hash').notNull().unique(),
+  createdAt: text('created_at').notNull(),
+  usedAt: text('used_at'),
+  /** Set when a new set of codes replaced this one. */
+  revokedAt: text('revoked_at'),
+});
+
+/** Server-side sessions. The browser holds a random token; only its SHA-256 hash is stored. */
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    tokenHash: text('token_hash').notNull().unique(),
+    createdAt: text('created_at').notNull(),
+    lastSeenAt: text('last_seen_at').notNull(),
+    /** When a fresh authenticator code was last entered in this session (step-up). */
+    stepUpAt: text('step_up_at'),
+    ip: text('ip').notNull().default(''),
+    userAgent: text('user_agent').notNull().default(''),
+    revokedAt: text('revoked_at'),
+    revokedReason: text('revoked_reason'),
+  },
+  () => [index('sessions_revoked_at_idx').on(sql`revoked_at`)],
+);
+
+/** Append-only authentication log (triggers refuse UPDATE and DELETE). Never holds secrets. */
+export const authEvents = sqliteTable(
+  'auth_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind', { enum: AUTH_EVENT_KINDS }).notNull(),
+    createdAt: text('created_at').notNull(),
+    sessionId: integer('session_id').references(() => sessions.id, { onDelete: 'restrict' }),
+    ip: text('ip').notNull().default(''),
+    userAgent: text('user_agent').notNull().default(''),
+    /** A short generic code such as "invalid_credentials". Never a password, code or token. */
+    detail: text('detail').notNull().default(''),
+  },
+  () => [check('auth_events_kind_check', inList('kind', AUTH_EVENT_KINDS))],
+);
+
+/**
+ * Failed attempts that were actually processed (used for the progressive delays). Survives
+ * restarts. Attempts rejected during a delay are NOT recorded here, so they cannot extend it.
+ */
+export const authAttempts = sqliteTable(
+  'auth_attempts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /** "global" or "source:<key>". */
+    bucket: text('bucket').notNull(),
+    kind: text('kind', { enum: ATTEMPT_KINDS }).notNull(),
+    atMs: integer('at_ms').notNull(),
+  },
+  () => [
+    index('auth_attempts_bucket_idx').on(sql`bucket`, sql`at_ms`),
+    check('auth_attempts_kind_check', inList('kind', ATTEMPT_KINDS)),
+  ],
+);
+
+export type OwnerRow = typeof owner.$inferSelect;
+export type SessionRow = typeof sessions.$inferSelect;
+export type AuthEventRow = typeof authEvents.$inferSelect;
+export type RecoveryCodeRow = typeof recoveryCodes.$inferSelect;

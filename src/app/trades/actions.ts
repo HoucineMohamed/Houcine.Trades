@@ -4,8 +4,9 @@ import { redirect } from 'next/navigation';
 import { evaluatePlanForAccount } from '@/data/risk';
 import { closeTradeAndSync, logTrade, openTradeChecked, RiskRefusalError } from '@/data/journal';
 import { cancelTrade, updateTrade } from '@/data/trades';
+import { StepUpRequiredError } from '@/domain/auth/stepup';
 import type { VerdictNumbers } from '@/domain/risk';
-import { requireDb } from '../_lib/db';
+import { guardedAction, optionalFreshAuth } from '../_lib/guard-core';
 import { errorMessages, formValues, toId, type FormState, type FormValues } from '../_lib/form';
 import {
   closeInputFromForm,
@@ -37,93 +38,102 @@ export interface RiskPreview {
  * Live risk verdict for the plan in the form. READ ONLY: it saves nothing. The same engine and
  * the same rules that will judge the real submission.
  */
-export async function previewRiskAction(values: FormValues): Promise<RiskPreview> {
-  const { accountId, plan } = planFromForm(values);
-  const { verdict } = evaluatePlanForAccount(await requireDb(), accountId, plan);
-  return {
-    approved: verdict.approved,
-    violations: verdict.violations,
-    warnings: verdict.warnings,
-    numbers: verdict.numbers,
-  };
-}
+export const previewRiskAction = guardedAction(
+  async (ctx, values: FormValues): Promise<RiskPreview> => {
+    const { accountId, plan } = planFromForm(values);
+    const { verdict } = evaluatePlanForAccount(ctx.db, accountId, plan);
+    return {
+      approved: verdict.approved,
+      violations: verdict.violations,
+      warnings: verdict.warnings,
+      numbers: verdict.numbers,
+    };
+  },
+);
 
 /**
  * Create form: the plan goes through the risk engine. If it is refused, the form is shown again
  * with every reason and the override fields (type OVERRIDE and a reason to log it anyway).
  */
-export async function createTradeAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  const values = formValues(formData);
-  try {
-    logTrade(await requireDb(), createInputFromForm(values), {
-      override: overrideFromForm(values),
-    });
-  } catch (error) {
-    if (error instanceof RiskRefusalError) {
-      return {
-        errors: [
-          'The risk engine refused this plan:',
-          ...error.verdict.violations.map((v) => v.message),
-        ],
-        values,
-        needsOverride: true,
-      };
+export const createTradeAction = guardedAction(
+  async (ctx, _prev: FormState, formData: FormData): Promise<FormState> => {
+    const values = formValues(formData);
+    try {
+      logTrade(ctx.db, createInputFromForm(values), {
+        override: overrideFromForm(values),
+        // Needed only when a refused plan is logged anyway (an override).
+        auth: optionalFreshAuth(ctx, formData),
+      });
+    } catch (error) {
+      if (error instanceof StepUpRequiredError) {
+        // Keep the override fields on screen so the code can be typed and the form re-sent.
+        return { errors: errorMessages(error), values, needsOverride: true };
+      }
+      if (error instanceof RiskRefusalError) {
+        return {
+          errors: [
+            'The risk engine refused this plan:',
+            ...error.verdict.violations.map((v) => v.message),
+          ],
+          values,
+          needsOverride: true,
+        };
+      }
+      return { errors: errorMessages(error), values };
     }
-    return { errors: errorMessages(error), values };
-  }
-  redirect(ok('Trade created'));
-}
+    redirect(ok('Trade created'));
+  },
+);
 
 /** Edit form (id is bound by the page). */
-export async function updateTradeAction(
-  id: number,
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const values = formValues(formData);
-  try {
-    updateTrade(await requireDb(), id, editPatchFromForm(values));
-  } catch (error) {
-    return { errors: errorMessages(error), values };
-  }
-  redirect(ok('Trade updated'));
-}
+export const updateTradeAction = guardedAction(
+  async (ctx, id: number, _prev: FormState, formData: FormData): Promise<FormState> => {
+    const values = formValues(formData);
+    try {
+      updateTrade(ctx.db, id, editPatchFromForm(values));
+    } catch (error) {
+      return { errors: errorMessages(error), values };
+    }
+    redirect(ok('Trade updated'));
+  },
+);
 
-export async function openTradeAction(formData: FormData) {
+export const openTradeAction = guardedAction(async (ctx, formData: FormData) => {
   const v = formValues(formData);
   let target: string;
   try {
-    openTradeChecked(await requireDb(), toId(v.id) ?? -1, openInputFromForm(v), {
+    openTradeChecked(ctx.db, toId(v.id) ?? -1, openInputFromForm(v), {
       override: overrideFromForm(v),
+      auth: optionalFreshAuth(ctx, formData),
     });
     target = ok('Trade opened');
   } catch (error) {
     target = failed(error);
   }
   redirect(target);
-}
+});
 
 /** Closing is never blocked by risk rules (it only reduces risk). */
-export async function closeTradeAction(formData: FormData) {
+export const closeTradeAction = guardedAction(async (ctx, formData: FormData) => {
   const v = formValues(formData);
   let target: string;
   try {
-    closeTradeAndSync(await requireDb(), toId(v.id) ?? -1, closeInputFromForm(v));
+    closeTradeAndSync(ctx.db, toId(v.id) ?? -1, closeInputFromForm(v));
     target = ok('Trade closed');
   } catch (error) {
     target = failed(error);
   }
   redirect(target);
-}
+});
 
-export async function cancelTradeAction(formData: FormData) {
+export const cancelTradeAction = guardedAction(async (ctx, formData: FormData) => {
   const v = formValues(formData);
   let target: string;
   try {
-    cancelTrade(await requireDb(), toId(v.id) ?? -1);
+    cancelTrade(ctx.db, toId(v.id) ?? -1);
     target = ok('Trade cancelled');
   } catch (error) {
     target = failed(error);
   }
   redirect(target);
-}
+});

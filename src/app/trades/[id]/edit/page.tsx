@@ -4,15 +4,15 @@ import { getAccount } from '@/data/accounts';
 import { listSetups } from '@/data/setups';
 import { getTrade } from '@/data/trades';
 import { editableFields } from '@/domain/trades/lifecycle';
-import { requireDb } from '../../../_lib/db';
+import { guardedPage } from '../../../_lib/guard';
 import { formatLocal, type FormValues } from '../../../_lib/form';
 import { updateTradeAction } from '../../actions';
 import { TradeForm } from '../../TradeForm';
 
-export default async function EditTradePage({ params }: { params: Promise<{ id: string }> }) {
+export default guardedPage(async (ctx, { params }: { params: Promise<{ id: string }> }) => {
   const { id: rawId } = await params;
   const id = /^\d+$/.test(rawId) ? Number(rawId) : NaN;
-  const db = await requireDb();
+  const db = ctx.db;
   const trade = Number.isNaN(id) ? undefined : getTrade(db, id);
   if (!trade) notFound();
 
@@ -80,4 +80,4 @@ export default async function EditTradePage({ params }: { params: Promise<{ id: 
       </p>
     </main>
   );
-}
+});

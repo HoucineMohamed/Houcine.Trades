@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ASSET_CLASSES } from '@/domain/trades/types';
 import { emptyFormState, formValues, type FormState, type FormValues } from '../_lib/form';
+import { StepUpField } from '../_lib/StepUpField';
 import type { RiskPreview } from './actions';
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
   submitLabel: string;
   /** Create mode: asks the server for the live risk verdict of the plan (saves nothing). */
   preview?: (values: FormValues) => Promise<RiskPreview>;
+  /** A code was accepted in the last 5 minutes (so an override needs no new code). */
+  stepUpFresh?: boolean;
 }
 
 export function TradeForm({
@@ -27,6 +30,7 @@ export function TradeForm({
   editable,
   submitLabel,
   preview,
+  stepUpFresh = false,
 }: Props) {
   const [state, formAction, pending] = useActionState(action, emptyFormState);
   const formRef = useRef<HTMLFormElement>(null);
@@ -83,7 +87,7 @@ export function TradeForm({
         </div>
       )}
       {/* Remount the inputs after a failed submit so they show what you typed. */}
-      <fieldset key={JSON.stringify(state.values)} style={{ border: 0, padding: 0 }}>
+      <fieldset key={JSON.stringify(state.values)} className="plain-fieldset">
         {mode === 'create'
           ? row(
               'Account',
@@ -196,10 +200,7 @@ export function TradeForm({
         )}
       </fieldset>
       {preview && (
-        <section
-          aria-live="polite"
-          style={{ border: '1px solid #888', padding: '0.5rem 1rem', margin: '1rem 0' }}
-        >
+        <section aria-live="polite" className="box">
           <strong>Risk check{checking ? ' (checking…)' : ''}</strong>
           {verdict === null ? (
             <p>Fill in the plan to see the risk check.</p>
@@ -244,7 +245,7 @@ export function TradeForm({
         </section>
       )}
       {preview && refused && (
-        <section style={{ border: '1px solid #c33', padding: '0.5rem 1rem', margin: '1rem 0' }}>
+        <section className="box box-danger">
           <strong>Log it anyway? (override)</strong>
           <p>
             <small>
@@ -263,6 +264,7 @@ export function TradeForm({
               <input name="overrideReason" size={60} maxLength={500} autoComplete="off" />
             </label>
           </p>
+          <StepUpField fresh={stepUpFresh} />
         </section>
       )}
       <button type="submit" disabled={pending}>

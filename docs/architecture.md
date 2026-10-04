@@ -6,8 +6,9 @@ Houcine.Trades is a single Next.js app with strict internal layering. The layers
 
 ```
 src/
-  app/            UI and routes
-  domain/         pure logic: risk/, stats/
+  app/            UI and routes (every entry point behind the guard)
+  auth/           server-only auth code: crypto, TOTP, sessions, services (impure)
+  domain/         pure logic: risk/, stats/, auth/ (rules only)
   data/           SQLite + Drizzle
   integrations/   tradingview-mcp/, exchanges/
   bots/           future bots framework
@@ -134,11 +135,33 @@ src/app/risk          /risk page                             settings, halts, ki
 `src/app` has plain HTML pages (accounts, setups, trade list, new trade, edit trade, stats) that call the
 repositories through Next.js server actions. `src/app/_lib/form.ts` and `trades/mapping.ts` only
 translate HTML form text (blank values, local time to UTC); all validation happens in the domain.
-The `/stats` page only displays what the engine returns (numbers and flags, no advice). Pages call `requireDb()`, which waits for a real request so `next build` never opens a database.
+The `/stats` page only displays what the engine returns (numbers and flags, no advice). Pages and actions get the database from the guard context, which waits for a real request so `next build` never opens a database.
 
-> **WARNING: no authentication exists yet (module 4).** Server actions can be called by anyone who
-> can reach the server. The app must run on localhost only (`dev` and `start` bind to 127.0.0.1)
-> and must not be deployed until authentication is built.
+## Authentication (module 4)
+
+Full explanation in `docs/security.md`. The structure:
+
+- `src/domain/auth/` is pure: password policy, throttle maths, session timing, the `FreshAuth`
+  step-up proof, recovery-code formats.
+- `src/auth/` is server-only (`import 'server-only'`): argon2id, AES-GCM, TOTP (`otpauth`), cookies,
+  client address, and `service.ts` (login, sessions, step-up, password and recovery management).
+- `src/data/auth.ts` and migration `0003_auth.sql` hold the tables (`owner` with `id = 1` enforced,
+  `sessions`, `recovery_codes`, append-only `auth_events`, `auth_attempts`) and their triggers.
+- `src/app/_lib/guard-core.ts` / `guard.tsx` are THE guard: `guardedPage`, `guardedAction`,
+  `guardedRoute` (and `publicPage` / `publicAction` for `/login` only). The wrappers hand out the
+  database (`ctx.db`); ESLint forbids `src/app` from importing the database client, so data is
+  unreachable without them. `tests/auth/guard-coverage.test.ts` parses `src/app` and fails if any
+  page, route handler or server action is unwrapped; `guard-dynamic.test.ts` calls each without a
+  session.
+- `src/proxy.ts` (Next 16's replacement for middleware) is the first, cheap line: cookie-presence
+  redirect, Origin/Host check, CSP nonce and headers (`src/auth/request-checks.ts`). It is not relied
+  on alone.
+- Layouts never touch data or the session; the signed-in navigation is rendered by `guardedPage`.
+- Sensitive data functions (`resetHalt`, `restoreDefaultRiskSettings`, `updateRiskSettings` when
+  loosening, `logTrade` / `openTradeChecked` with an override) take a `FreshAuth` and call
+  `assertFreshAuth`. Only `src/auth` may create one (ESLint).
+- Command-line scripts in `scripts/auth/` (run with `tsx --conditions=react-server`) create and
+  reset the owner; there is no web equivalent.
 
 ## Data and hosting
 

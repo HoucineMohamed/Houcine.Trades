@@ -10,10 +10,12 @@ import {
 import { haltManually, syncRiskState } from '@/data/risk';
 import { listRiskEvents } from '@/data/risk-events';
 import { getTrade, listTrades } from '@/data/trades';
+import { issueFreshAuth } from '@/domain/auth/stepup';
 import { ValidationError } from '@/domain/errors';
 import { at, closedTrade, riskDb } from '../helpers/risk';
 
 const NOW = at('2026-03-10T12:00:00.000Z');
+const AUTH = issueFreshAuth(1, NOW);
 const OVERRIDE = { confirm: 'OVERRIDE', reason: 'I already took this trade on the exchange' };
 
 // long BTCUSDT entry 100, stop 95 -> risk = 5 x size. Equity 10000: 1 % limit = 100 -> size 20 is exactly at the limit.
@@ -128,14 +130,16 @@ describe('override: a refused plan can be LOGGED with a typed reason, and is cle
       { confirm: 'OVERRIDE' },
       { reason: 'a good long reason here' },
     ]) {
-      expect(() => logTrade(db, tooBig(), { now: () => NOW, override })).toThrow(ValidationError);
+      expect(() => logTrade(db, tooBig(), { now: () => NOW, override, auth: AUTH })).toThrow(
+        ValidationError,
+      );
     }
     expect(tradeCount(db)).toBe(0);
   });
 
   it('with a valid override the trade is saved, the verdict says refused + the reason, and an override event is logged', () => {
     const db = riskDb();
-    const r = logTrade(db, tooBig(), { now: () => NOW, override: OVERRIDE });
+    const r = logTrade(db, tooBig(), { now: () => NOW, override: OVERRIDE, auth: AUTH });
     expect(r.overridden).toBe(true);
     expect(r.verdict.approved).toBe(false);
     expect(getTrade(db, r.trade.id)?.status).toBe('planned');
@@ -165,7 +169,7 @@ describe('override: a refused plan can be LOGGED with a typed reason, and is cle
   it('works while trading is halted (you may log a trade you already took) and is flagged', () => {
     const db = riskDb();
     haltManually(db, 1, 'cooling off', NOW);
-    const r = logTrade(db, input(), { now: () => NOW, override: OVERRIDE });
+    const r = logTrade(db, input(), { now: () => NOW, override: OVERRIDE, auth: AUTH });
     expect(r.overridden).toBe(true);
     expect(getTradeRiskFlags(db).get(r.trade.id)?.violationCodes).toEqual(['HALTED_MANUAL']);
   });
@@ -173,7 +177,7 @@ describe('override: a refused plan can be LOGGED with a typed reason, and is cle
   it('an override can never rescue bad data: an unknown account is still an error', () => {
     const db = riskDb();
     expect(() =>
-      logTrade(db, input({ accountId: 99 }), { now: () => NOW, override: OVERRIDE }),
+      logTrade(db, input({ accountId: 99 }), { now: () => NOW, override: OVERRIDE, auth: AUTH }),
     ).toThrow(/Account not found/);
     expect(tradeCount(db)).toBe(0);
   });
@@ -182,7 +186,11 @@ describe('override: a refused plan can be LOGGED with a typed reason, and is cle
     const db = riskDb();
     const before = eventKinds(db).length;
     expect(() =>
-      logTrade(db, input({ size: '30', setupId: 999 }), { now: () => NOW, override: OVERRIDE }),
+      logTrade(db, input({ size: '30', setupId: 999 }), {
+        now: () => NOW,
+        override: OVERRIDE,
+        auth: AUTH,
+      }),
     ).toThrow(/Setup not found/);
     expect(tradeCount(db)).toBe(0);
     expect(eventKinds(db)).toHaveLength(before);
@@ -242,9 +250,14 @@ describe('opening a planned trade goes through the risk engine again', () => {
     const planned = logTrade(db, input({ size: '1' }), {
       now: () => NOW,
       override: OVERRIDE,
+      auth: AUTH,
     }).trade; // 4th trade: needs override already? it is only planned
     // (a planned trade counts as a plan that would open now, so even creating it needed the override)
-    const r = openTradeChecked(db, planned.id, OPEN, { now: () => NOW, override: OVERRIDE });
+    const r = openTradeChecked(db, planned.id, OPEN, {
+      now: () => NOW,
+      override: OVERRIDE,
+      auth: AUTH,
+    });
     expect(r.overridden).toBe(true);
     expect(getTrade(db, planned.id)?.status).toBe('open');
     const stages = listVerdicts(db, planned.id).map((v) => [
@@ -299,7 +312,11 @@ describe('closing is never blocked, and it latches a halt it causes', () => {
         entryPrice: '100000',
         openedAt: '2026-03-02T00:00:00Z',
       }),
-      { now: () => at('2026-03-02T00:00:00.000Z'), override: OVERRIDE },
+      {
+        now: () => at('2026-03-02T00:00:00.000Z'),
+        override: OVERRIDE,
+        auth: issueFreshAuth(1, at('2026-03-02T00:00:00.000Z')),
+      },
     ).trade;
     haltManually(db, 1, 'being careful', at('2026-03-02T08:00:00.000Z'));
     const closed = closeTradeAndSync(

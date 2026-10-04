@@ -1,4 +1,5 @@
 import { NotFoundError } from '@/data/errors';
+import { StepUpRequiredError } from '@/domain/auth/stepup';
 import { ValidationError } from '@/domain/errors';
 
 export type FormValues = Record<string, string>;
@@ -16,7 +17,10 @@ export const emptyFormState: FormState = { errors: [], values: {} };
 export function formValues(formData: FormData): FormValues {
   const out: FormValues = {};
   for (const [key, value] of formData.entries()) {
-    if (typeof value === 'string' && !key.startsWith('$ACTION')) out[key] = value;
+    // The authenticator code is never copied into the values sent back to the page.
+    if (typeof value === 'string' && !key.startsWith('$ACTION') && key !== 'stepUpCode') {
+      out[key] = value;
+    }
   }
   return out;
 }
@@ -68,5 +72,10 @@ export function errorMessages(error: unknown): string[] {
     return error.issues.map((i) => (i.field ? `${i.field}: ${i.message}` : i.message));
   }
   if (error instanceof NotFoundError) return [error.message];
+  if (error instanceof StepUpRequiredError) {
+    return [
+      `${error.message}. Type your current 6-digit authenticator code in the "Authenticator code" box and submit again.`,
+    ];
+  }
   throw error;
 }
