@@ -52,14 +52,15 @@ export interface SignedText {
   text: string;
   kind: ResultKind;
   /** A neutral word shown next to the number so colour is never the only signal. */
-  word: 'profit' | 'loss' | 'break-even';
+  word: 'profit' | 'loss' | 'break-even' | 'unreadable';
 }
 
 const WORD = { profit: 'profit', loss: 'loss', flat: 'break-even' } as const;
 
 /** A result (net P&L, today's result): explicit sign, separators and a neutral word. */
 export function formatSigned(value: string, places = 8): SignedText {
-  if (!isDecimalString(value)) return { text: value, kind: 'flat', word: 'break-even' };
+  if (!isDecimalString(value))
+    return { text: value === '' ? 'n/a' : value, kind: 'flat', word: 'unreadable' };
   const shown = displayMoney(value, places); // "-0" can never appear
   const kind = resultKind(shown);
   const grouped = groupThousands(shown.replace(/^-/, ''));
@@ -69,7 +70,8 @@ export function formatSigned(value: string, places = 8): SignedText {
 
 /** Like formatSigned, with the money precision of formatMoney. */
 export function formatMoneySigned(value: string): SignedText {
-  if (!isDecimalString(value)) return { text: value, kind: 'flat', word: 'break-even' };
+  if (!isDecimalString(value))
+    return { text: value === '' ? 'n/a' : value, kind: 'flat', word: 'unreadable' };
   const kind = resultKind(displayMoney(value, 8));
   const body = formatMoney(value.replace(/^-/, ''));
   const text = kind === 'profit' ? `+${body}` : kind === 'loss' ? `${MINUS}${body}` : '0';
@@ -78,7 +80,8 @@ export function formatMoneySigned(value: string): SignedText {
 
 /** R-multiples keep the engine's 4 decimals: "+1.5000 R". */
 export function formatR(value: string): SignedText {
-  if (!isDecimalString(value)) return { text: value, kind: 'flat', word: 'break-even' };
+  if (!isDecimalString(value))
+    return { text: value === '' ? 'n/a' : value, kind: 'flat', word: 'unreadable' };
   const kind = resultKind(value);
   const abs = value.replace(/^-/, '');
   const body = `${abs} R`;

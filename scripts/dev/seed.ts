@@ -1,6 +1,6 @@
 import { assertDatabaseReady, createDatabase, migrateDatabase } from '@/data/client';
 import { resolveDemoTarget, SeedRefusedError } from './guard';
-import { seedDemo } from './seed-demo';
+import { assertFreshDatabase, seedDemo } from './seed-demo';
 
 /**
  * npm run dev:seed - fills a DEMO database with made-up data. See the README ("Demo data").
@@ -16,6 +16,7 @@ function main(): number {
     const file = resolveDemoTarget(process.env.DATABASE_URL, process.cwd());
     console.log(`Demo database file: ${file}`);
     const db = createDatabase(file);
+    assertFreshDatabase(db); // before migrating: a wrong file is not touched at all
     migrateDatabase(db);
     assertDatabaseReady(db);
     const s = seedDemo(db);

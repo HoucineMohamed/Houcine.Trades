@@ -6,6 +6,7 @@ import { getAuthEnv, resetAuthEnvCache } from '@/auth/env';
 import { login } from '@/auth/service';
 import type { Db } from '@/data/client';
 import { createAccount } from '@/data/accounts';
+import { haltManually } from '@/data/risk';
 import { closeTrade, createTrade } from '@/data/trades';
 import { seedDemo } from '../../scripts/dev/seed-demo';
 import { CLIENT, codeAt, dbWithOwner, PASSWORD } from '../helpers/auth';
@@ -120,6 +121,7 @@ async function render(entry: (typeof PAGES)[number]): Promise<string> {
   // replaces it with a real action). It is a script and a javascript: address that our pages
   // never contain themselves, so only these exact strings are removed before the check.
   return raw
+    .replaceAll('<!-- -->', '') // React's separators between adjacent text pieces
     .replace(/<script>addEventListener\("submit"[\s\S]*?<\/script>/, '')
     .replaceAll('javascript:throw new Error(&#x27;React form unexpectedly submitted.&#x27;)', '')
     .replaceAll("javascript:throw new Error('React form unexpectedly submitted.')", '');
@@ -259,6 +261,42 @@ describe('a halted account and odd data still render safely', () => {
     expect(detail).not.toContain('href="C:');
     expect(detail).toContain('C:\\screens\\a.png'); // a file path stays plain text
     expect(detail).toContain('&lt;script&gt;'); // notes are escaped text
+  });
+});
+
+describe('page structure', () => {
+  it('journal: every table row has as many cells as the table has column headers', async () => {
+    seedDemo(request.db as Db, new Date());
+    await signIn();
+    const html = await render(PAGES[1] as (typeof PAGES)[number]);
+    const table = /<table[\s\S]*?<\/table>/.exec(html)?.[0] ?? '';
+    const headers = (/<thead>[\s\S]*?<\/thead>/.exec(table)?.[0].match(/<th[\s>]/g) ?? []).length;
+    const rows = [...table.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].slice(1);
+    expect(headers).toBeGreaterThan(5);
+    expect(rows.length).toBeGreaterThan(5);
+    for (const r of rows) expect((r[1]?.match(/<t[dh][\s>]/g) ?? []).length).toBe(headers);
+  });
+
+  it('the header shows a halt on ANOTHER account, not only on the selected one', async () => {
+    const db = request.db as Db;
+    const a = createAccount(db, { name: 'Alpha', baseCurrency: 'USDT', startingBalance: '1000' });
+    const b = createAccount(db, { name: 'Bravo', baseCurrency: 'USDT', startingBalance: '1000' });
+    haltManually(db, b.id, 'testing the header');
+    await signIn();
+    request.cookies = { ...request.cookies, houcine_account: String(a.id) };
+    const html = await render(PAGES[0] as (typeof PAGES)[number]);
+    expect(html).toContain('No halt active'); // Alpha, the selected one
+    expect(html).toMatch(/Bravo: HALTED: manual halt/);
+  });
+
+  it('every help summary names its topic for screen readers', async () => {
+    seedDemo(request.db as Db, new Date());
+    await signIn();
+    const html = await render(PAGES[9] as (typeof PAGES)[number]); // /stats
+    expect(html).toContain('visually-hidden');
+    expect(html).toMatch(
+      /What does this mean\?<span class="visually-hidden"> about: [^<]+<\/span>/,
+    );
   });
 });
 

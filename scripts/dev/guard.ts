@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -21,7 +22,12 @@ const samePath = (a: string, b: string) =>
   path.normalize(a).toLowerCase() === path.normalize(b).toLowerCase();
 
 /** Returns the absolute path of the demo file, or throws SeedRefusedError saying why not. */
-export function resolveDemoTarget(databaseUrl: string | undefined, cwd: string): string {
+export function resolveDemoTarget(
+  databaseUrl: string | undefined,
+  cwd: string,
+  /** Follows symbolic links. Injected in tests. */
+  realpath: (p: string) => string = fs.realpathSync,
+): string {
   const raw = (databaseUrl ?? '').trim();
   if (raw === '') {
     throw new SeedRefusedError(
@@ -32,9 +38,18 @@ export function resolveDemoTarget(databaseUrl: string | undefined, cwd: string):
   if (file === ':memory:' || file === '') {
     throw new SeedRefusedError('DATABASE_URL must be a file with "demo" in its name, not memory.');
   }
-  const resolved = path.resolve(cwd, file);
+  const typed = path.resolve(cwd, file);
   const real = path.resolve(cwd, REAL_DATABASE_FILE);
-  if (samePath(resolved, real)) {
+  // Follow symbolic links: a file called demo.db that points at the real journal is the real journal.
+  const follow = (p: string) => {
+    try {
+      return realpath(p);
+    } catch {
+      return p; // does not exist (yet)
+    }
+  };
+  const resolved = follow(typed);
+  if (samePath(resolved, real) || samePath(resolved, follow(real))) {
     throw new SeedRefusedError(
       `DATABASE_URL points at the real journal (${resolved}). Nothing was opened or changed.`,
     );

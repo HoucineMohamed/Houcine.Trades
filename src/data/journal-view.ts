@@ -37,6 +37,8 @@ export interface JournalRow extends SortableRow {
   exitPrice: string | null;
   stopLoss: string;
   overridden: boolean;
+  /** Why the stats engine could not use a closed trade, or null. */
+  skippedReason: string | null;
 }
 
 /** Net P&L and net R per closed trade id, straight from the stats engine. */
@@ -72,7 +74,9 @@ export interface JournalView {
 
 export function listJournal(db: Reader, accountId: number, query: JournalQuery): JournalView {
   const names = setupNames(db);
-  const results = resultsByTrade(computeAccountStats(loadStatsInput(db, accountId)));
+  const stats = computeAccountStats(loadStatsInput(db, accountId));
+  const results = resultsByTrade(stats);
+  const skipped = skippedByTrade(stats);
   const flags = getTradeRiskFlags(db);
   const all: JournalRow[] = db
     .select()
@@ -100,6 +104,7 @@ export function listJournal(db: Reader, accountId: number, query: JournalQuery):
       netPnl: results.get(t.id)?.netPnl ?? null,
       netR: results.get(t.id)?.netR.value ?? null,
       overridden: flags.get(t.id)?.overridden ?? false,
+      skippedReason: skipped.get(t.id)?.reason ?? null,
     }));
 
   const wanted = query.symbol?.toUpperCase() ?? null;
@@ -107,7 +112,7 @@ export function listJournal(db: Reader, accountId: number, query: JournalQuery):
     (r) =>
       (query.status === null || r.status === query.status) &&
       (query.direction === null || r.direction === query.direction) &&
-      (wanted === null || r.symbol.toUpperCase() === wanted) &&
+      (wanted === null || r.symbol.toUpperCase().includes(wanted)) &&
       (query.setupId === null || r.setupId === query.setupId) &&
       (!query.overrideOnly || r.overridden),
   );
@@ -129,6 +134,8 @@ export interface VerdictView {
   violations: { code: string; message: string }[];
   warnings: { code: string; message: string }[];
   numbers: Record<string, unknown> | null;
+  /** True when the stored snapshot could not be read completely: what is shown may be missing parts. */
+  damaged: boolean;
 }
 
 export interface TradeDetail {
@@ -142,32 +149,46 @@ export interface TradeDetail {
   verdicts: VerdictView[];
 }
 
-const asList = (v: unknown): { code: string; message: string }[] =>
-  Array.isArray(v)
-    ? v
-        .filter((x): x is { code: string; message: string } => !!x && typeof x.code === 'string')
-        .map((x) => ({ code: x.code, message: String(x.message ?? '') }))
-    : [];
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Reads a list of {code, message}. Anything else is reported as damage, never dropped silently. */
+function asList(v: unknown): { list: { code: string; message: string }[]; damaged: boolean } {
+  if (v === undefined) return { list: [], damaged: false };
+  if (!Array.isArray(v)) return { list: [], damaged: true };
+  const list: { code: string; message: string }[] = [];
+  let damaged = false;
+  for (const x of v) {
+    if (isRecord(x) && typeof x.code === 'string') {
+      list.push({ code: x.code, message: String(x.message ?? '') });
+    } else damaged = true;
+  }
+  return { list, damaged };
+}
 
 /** Reads a stored verdict snapshot defensively: damaged JSON shows as "no details", never a crash. */
 export function parseVerdict(row: RiskVerdictRow): VerdictView {
   let snapshot: Record<string, unknown> | null = null;
   try {
     const parsed: unknown = JSON.parse(row.snapshotJson);
-    snapshot = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    snapshot = isRecord(parsed) ? parsed : null;
   } catch {
     snapshot = null;
   }
+  const violations = asList(snapshot?.violations);
+  const warnings = asList(snapshot?.warnings);
   const numbers = snapshot?.numbers;
+  const numbersOk = numbers === undefined || isRecord(numbers);
   return {
     id: row.id,
     stage: row.stage,
     approved: row.approved === 1,
     createdAt: row.createdAt,
     overrideReason: row.overrideReason,
-    violations: asList(snapshot?.violations),
-    warnings: asList(snapshot?.warnings),
-    numbers: numbers && typeof numbers === 'object' ? (numbers as Record<string, unknown>) : null,
+    violations: violations.list,
+    warnings: warnings.list,
+    numbers: isRecord(numbers) ? numbers : null,
+    damaged: snapshot === null || violations.damaged || warnings.damaged || !numbersOk,
   };
 }
 

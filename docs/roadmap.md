@@ -55,7 +55,11 @@ Modules are built in this order, each on its own branch with tests and small com
    live prices, so open trades show their risk at the stop but no unrealised result; the size helper
    uses the per-trade limit only (the Risk page calculator takes any risk %); no favicon or logo
    (text wordmark only, and the proxy must not serve public files); the demo override example is a
-   directly inserted demo record (the real override path needs a fresh code).
+   directly inserted demo record (the real override path needs a fresh code). Known and accepted:
+   the `?ok=` / `?error=` notices come from the address and only look like confirmations (a
+   crafted link could show a false "saved" text; nothing is changed by it); an error or "not found"
+   page renders without the header; if the remembered account was deleted the first account is
+   shown without a notice.
 6. **Claude analyst and TradingView MCP**: AI analysis; the AI never does the math. Vet the MCP
    server first (rule 8).
 7. **Notifications**: alerts for risk limits and events.

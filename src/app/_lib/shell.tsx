@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { getEnv } from '@/config/env';
 import { loadRiskContext } from '@/data/risk';
 import { logoutAction } from '../security/actions';
 import { THEME_COOKIE, parseTheme, selectedAccount, THEMES } from './account';
@@ -15,7 +16,13 @@ const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' } as const;
 /** Header, navigation and page frame around every signed-in page. Displays; decides nothing. */
 export async function Shell({ ctx, children }: { ctx: GuardContext; children: ReactNode }) {
   const { accounts, selected } = await selectedAccount(ctx);
-  const status = selected ? riskStatus(loadRiskContext(ctx.db, selected.id, ctx.now)) : null;
+  const statuses = accounts.map((a) => ({
+    account: a,
+    status: riskStatus(loadRiskContext(ctx.db, a.id, ctx.now)),
+  }));
+  const status = statuses.find((s) => s.account.id === selected?.id)?.status ?? null;
+  // an account that is halted or unverifiable must not hide behind the one that is selected
+  const others = statuses.filter((s) => s.account.id !== selected?.id && s.status.tone !== 'clear');
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
     <>
@@ -32,17 +39,33 @@ export async function Shell({ ctx, children }: { ctx: GuardContext; children: Re
             Houcine.Trades
           </Link>
           <span className="badge badge-paper" title="No real orders can be placed">
-            {(selected?.mode ?? 'paper').toUpperCase()}
+            {(selected?.mode ?? getEnv().TRADING_MODE).toUpperCase()}
           </span>
           {status && (
             <span
-              className={status.tone === 'halted' ? 'badge badge-halt' : 'badge badge-note'}
+              className={
+                status.tone === 'halted'
+                  ? 'badge badge-halt'
+                  : status.tone === 'unverified'
+                    ? 'badge badge-unverified'
+                    : 'badge badge-note'
+              }
               role="status"
               title={status.detail}
             >
               {status.label}
             </span>
           )}
+          {others.map((o) => (
+            <span
+              key={o.account.id}
+              className={o.status.tone === 'halted' ? 'badge badge-halt' : 'badge badge-unverified'}
+              role="status"
+              title={o.status.detail}
+            >
+              {o.account.name}: {o.status.label}
+            </span>
+          ))}
           <div className="header-tools">
             <AccountSwitch
               action={selectAccountAction}

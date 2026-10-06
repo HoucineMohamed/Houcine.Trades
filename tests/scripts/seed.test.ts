@@ -3,13 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { createDatabase } from '@/data/client';
 import { loadDashboard } from '@/data/dashboard';
 import { listAccounts } from '@/data/accounts';
 import { listJournal } from '@/data/journal-view';
 import { listSetups } from '@/data/setups';
 import { parseJournalQuery } from '@/domain/trades/table';
 import { REAL_DATABASE_FILE, resolveDemoTarget, SeedRefusedError } from '../../scripts/dev/guard';
-import { DEMO_ACCOUNT_NAME, seedDemo } from '../../scripts/dev/seed-demo';
+import { assertFreshDatabase, DEMO_ACCOUNT_NAME, seedDemo } from '../../scripts/dev/seed-demo';
+import { createOwner } from '@/auth/service';
+import { testEnv } from '../helpers/auth';
 import { memoryDb } from '../helpers/db';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -49,6 +52,60 @@ describe('the demo seed guard', () => {
     expect(() => resolveDemoTarget('file::memory:', cwd)).toThrow(SeedRefusedError);
     expect(() => resolveDemoTarget(':memory:', cwd)).toThrow(SeedRefusedError);
     expect(() => resolveDemoTarget('file:./demo/houcine-trades.db', cwd)).toThrow(SeedRefusedError);
+  });
+});
+
+describe('the demo seed guard follows symbolic links', () => {
+  it('refuses a demo-named link that points at the real journal (injected realpath)', () => {
+    const cwd = '/work/project';
+    const real = path.resolve(cwd, REAL_DATABASE_FILE);
+    const link = path.resolve(cwd, 'data/demo.db');
+    const realpath = (p: string) => (path.resolve(p) === link ? real : p);
+    expect(() => resolveDemoTarget('file:./data/demo.db', cwd, realpath)).toThrow(/real journal/);
+  });
+  it('refuses a link whose real target is not named like a demo file', () => {
+    const cwd = '/work/project';
+    const link = path.resolve(cwd, 'data/demo.db');
+    const realpath = (p: string) => (path.resolve(p) === link ? '/elsewhere/journal.db' : p);
+    expect(() => resolveDemoTarget('file:./data/demo.db', cwd, realpath)).toThrow(
+      /does not contain "demo"/,
+    );
+  });
+  it('with real files on disk: a symlink demo.db -> the real journal is refused', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'houcine-guard-'));
+    try {
+      fs.mkdirSync(path.join(dir, 'data'));
+      fs.writeFileSync(path.join(dir, REAL_DATABASE_FILE), '');
+      fs.symlinkSync(path.join(dir, REAL_DATABASE_FILE), path.join(dir, 'data', 'demo.db'));
+      expect(() => resolveDemoTarget('file:./data/demo.db', dir)).toThrow(SeedRefusedError);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it('a file that does not exist yet is fine', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'houcine-guard-'));
+    try {
+      expect(resolveDemoTarget('file:./data/demo.db', dir)).toContain('demo.db');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('assertFreshDatabase (checked before anything is migrated)', () => {
+  it('accepts an empty database and a file with no tables at all', () => {
+    expect(() => assertFreshDatabase(memoryDb())).not.toThrow();
+    expect(() => assertFreshDatabase(createDatabase(':memory:'))).not.toThrow();
+  });
+  it('refuses a database that has accounts', () => {
+    const db = memoryDb();
+    seedDemo(db, NOW);
+    expect(() => assertFreshDatabase(db)).toThrow(/already contains accounts/);
+  });
+  it('refuses a database that already has an owner (it is a real, set-up journal)', async () => {
+    const db = memoryDb();
+    await createOwner(db, 'lantern violin concrete orbit pepper', { env: testEnv() });
+    expect(() => assertFreshDatabase(db)).toThrow(/already has an owner/);
   });
 });
 

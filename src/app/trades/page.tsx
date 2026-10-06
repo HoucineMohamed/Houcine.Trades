@@ -1,14 +1,14 @@
 import Link from 'next/link';
 import { listJournal, type JournalRow } from '@/data/journal-view';
 import { STATUSES, DIRECTIONS } from '@/domain/trades/types';
-import { parseJournalQuery, type SortKey } from '@/domain/trades/table';
+import { defaultDir, parseJournalQuery, type SortKey } from '@/domain/trades/table';
 import { selectedAccount } from '../_lib/account';
 import { formatAmount, formatUtc } from '../_lib/format';
 import { guardedPage } from '../_lib/guard';
 import { Signed, SignedR } from '../_lib/ui';
 import { ariaSort, journalHref, sortHref } from './query';
 
-type SearchParams = Record<string, string | undefined>;
+type SearchParams = Record<string, string | string[] | undefined>;
 
 function SortHeader({
   q,
@@ -68,12 +68,12 @@ export default guardedPage(
             stats engine, in the currency each trade is quoted in.
           </p>
         </div>
-        {sp.ok && (
+        {typeof sp.ok === 'string' && (
           <p role="status" className="notice notice-ok">
             {sp.ok}
           </p>
         )}
-        {sp.error && (
+        {typeof sp.error === 'string' && (
           <p role="alert" className="notice notice-alert">
             {sp.error}
           </p>
@@ -103,7 +103,7 @@ export default guardedPage(
             </select>
           </div>
           <div>
-            <label htmlFor="flt-symbol">Symbol</label>
+            <label htmlFor="flt-symbol">Symbol (contains)</label>
             <input id="flt-symbol" name="symbol" defaultValue={q.symbol ?? ''} maxLength={30} />
           </div>
           <div>
@@ -130,6 +130,7 @@ export default guardedPage(
             </label>
           </div>
           {q.sort !== 'created' && <input type="hidden" name="sort" value={q.sort} />}
+          {q.dir !== defaultDir(q.sort) && <input type="hidden" name="dir" value={q.dir} />}
           <div>
             <button type="submit">Apply</button>
           </div>
@@ -180,8 +181,8 @@ export default guardedPage(
                   <SortHeader q={q} sortKey="r" num>
                     Net R
                   </SortHeader>
-                  <SortHeader q={q} sortKey={q.status === 'closed' ? 'closed' : 'opened'}>
-                    {q.status === 'closed' ? 'Closed (UTC)' : 'Date (UTC)'}
+                  <SortHeader q={q} sortKey="date">
+                    Date (UTC)
                   </SortHeader>
                 </tr>
               </thead>
@@ -194,8 +195,9 @@ export default guardedPage(
                       </Link>{' '}
                       {r.overridden && <span className="badge badge-override">override</span>}
                     </td>
-                    <td>{r.symbol}</td>
-                    <td>{r.direction}</td>
+                    <td>
+                      {r.symbol} <span className="small">{r.direction}</span>
+                    </td>
                     <td className={`status-${r.status}`}>{r.status}</td>
                     <td>{r.setupName ?? ''}</td>
                     <td className="num">
@@ -207,7 +209,9 @@ export default guardedPage(
                     <td className="num">
                       {r.netPnl === null ? (
                         r.status === 'closed' ? (
-                          <span className="na">not calculated</span>
+                          <span className="na" title={r.skippedReason ?? undefined}>
+                            not calculated{r.skippedReason ? ` (${r.skippedReason})` : ''}
+                          </span>
                         ) : (
                           ''
                         )

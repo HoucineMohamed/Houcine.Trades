@@ -40,6 +40,9 @@ export default guardedPage(async (ctx) => {
         </p>
       </div>
 
+      {stats.currencies.length === 0 && (
+        <p className="notice notice-note">No statistics yet: close a trade and they appear here.</p>
+      )}
       {stats.currencies.map((c) => {
         const o = c.overall;
         const distribution = computeRDistribution(c.tradeResults);

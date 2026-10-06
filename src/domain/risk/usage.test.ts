@@ -194,3 +194,55 @@ describe('invalid settings', () => {
     expect(c).toEqual(copy);
   });
 });
+
+describe('edge cases the first tests missed', () => {
+  it('drawdown with a zero or negative peak cannot be measured', () => {
+    for (const peak of ['0', '-5']) {
+      const u = computeRiskUsage(ctx({ peakEquity: peak, fallFromPeak: '0' })).drawdown;
+      expect(u.used).toBeNull();
+      expect(u.reached).toBeNull();
+      expect(u.limitPercent).toBe('10');
+      expect(u.problem).toContain('peak equity is zero');
+    }
+  });
+  it('a limit of zero: nothing to divide by, and "reached" is exact (0 >= 0)', () => {
+    const daily = computeRiskUsage(
+      ctx({ settings: withSettings({ maxDailyLossPercent: '0' }), todayNetPnl: '0' }),
+    ).dailyLoss;
+    expect(daily).toMatchObject({ limitAmount: '0', shareOfLimit: null, reached: true });
+    const trades = computeRiskUsage(
+      ctx({ settings: withSettings({ maxOpenTrades: 0 }) }),
+    ).openTrades;
+    expect(trades).toEqual({ used: 0, limit: 0, shareOfLimit: null, reached: true });
+  });
+  it('one good open trade plus one bad one: no partial sum is ever reported', () => {
+    const u = computeRiskUsage(
+      ctx({
+        openTrades: [openTrade({ tradeId: 1 }), openTrade({ tradeId: 2, quoteCurrency: 'EUR' })],
+      }),
+    ).openRisk;
+    expect(u.used).toBeNull();
+    expect(u.reached).toBeNull();
+    expect(u.problem).toContain('#2');
+  });
+  it('rounds both shares up: 100.01 of a 300 limit on 10000 equity', () => {
+    // risk = |100.01 - 95| x 20 = 100.2 ; use a size that gives exactly 100.01: 5 x 20.002
+    const u = computeRiskUsage(
+      ctx({ openTrades: [openTrade({ tradeId: 1, size: '20.002' })] }),
+    ).openRisk;
+    expect(u.used).toBe('100.01');
+    expect(u.usedPercent).toBe('1.01'); // 1.0001 % rounded UP
+    expect(u.shareOfLimit).toBe('33.34'); // 33.3367 % rounded UP
+  });
+  it('over the limit: the share is above 100 and reached', () => {
+    const u = computeRiskUsage(ctx({ peakEquity: '12000', fallFromPeak: '1500' })).drawdown;
+    expect(u).toMatchObject({ shareOfLimit: '125.00', usedPercent: '12.50', reached: true });
+  });
+  it('each line stands on its own: missing equity does not remove the daily-loss figure', () => {
+    const u = computeRiskUsage(
+      ctx({ equity: null, equityProblem: 'x', dayStartEquity: '10000', todayNetPnl: '-100' }),
+    );
+    expect(u.dailyLoss).toMatchObject({ used: '100', shareOfLimit: '33.34' });
+    expect(u.openRisk.used).toBeNull();
+  });
+});

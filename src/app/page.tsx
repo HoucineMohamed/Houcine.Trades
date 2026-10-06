@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { loadDashboard } from '@/data/dashboard';
+import { RISK_DEFAULTS } from '@/domain/risk';
 import { formatAmount, formatMoney, formatUtc } from './_lib/format';
 import { selectedAccount } from './_lib/account';
 import { EquityChart } from './_lib/charts';
@@ -30,9 +31,11 @@ function GettingStarted({ hasAccount, hasTrades }: { hasAccount: boolean; hasTra
           and a starting balance).
         </li>
         <li>
-          <Link href="/risk">Review the risk limits</Link>. The defaults are 1 % risk per trade, 3 %
-          daily loss, 3 % open risk, 3 open trades and a 10 % drawdown limit; you can tighten them
-          at once.
+          <Link href="/risk">Review the risk limits</Link>. The default values are{' '}
+          {RISK_DEFAULTS.maxRiskPerTradePercent} % risk per trade,{' '}
+          {RISK_DEFAULTS.maxDailyLossPercent} % daily loss, {RISK_DEFAULTS.maxOpenRiskPercent} %
+          open risk, {RISK_DEFAULTS.maxOpenTrades} open trades and a{' '}
+          {RISK_DEFAULTS.maxDrawdownPercent} % drawdown limit; tightening a limit applies at once.
         </li>
         <li className={hasTrades ? 'done' : undefined}>
           <Link href="/trades/new">Log a first paper trade</Link>. A stop-loss is required, and the
@@ -225,6 +228,9 @@ export default guardedPage(async (ctx) => {
           <h2 id="currency-title">Results by currency</h2>
           <Link href="/stats">All statistics</Link>
         </div>
+        {d.stats.currencies.length === 0 && (
+          <p className="small">No result can be shown yet: there are no closed trades.</p>
+        )}
         <div className="grid grid-2">
           {d.stats.currencies.map((c) => (
             <div className="panel" key={c.quoteCurrency}>
@@ -297,7 +303,9 @@ export default guardedPage(async (ctx) => {
                     <td>{t.direction}</td>
                     <td className="num">
                       {t.netPnl === null ? (
-                        <span className="na">not calculated</span>
+                        <span className="na" title={t.skippedReason ?? undefined}>
+                          not calculated{t.skippedReason ? ` (${t.skippedReason})` : ''}
+                        </span>
                       ) : (
                         <Signed value={t.netPnl} currency={t.quoteCurrency} />
                       )}

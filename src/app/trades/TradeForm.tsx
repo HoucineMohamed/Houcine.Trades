@@ -40,27 +40,59 @@ export function TradeForm({
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [verdict, setVerdict] = useState<RiskPreview | null>(null);
   const [checking, setChecking] = useState(false);
+  // true when the live check could not run (the server still judges the plan when you save)
+  const [checkFailed, setCheckFailed] = useState(false);
   const [suggestion, setSuggestion] = useState<SizeSuggestion | null>(null);
+  const [suggestionFailed, setSuggestionFailed] = useState(false);
+  // currencies of the plan being checked: amounts of the verdict are in the ACCOUNT currency
+  const [currencies, setCurrencies] = useState({ account: '', quote: '' });
+  // only the newest reply may be shown: a slow reply for older values is ignored
+  const request = useRef(0);
 
   // Live checks: a moment after you stop typing, ask the server (same engine, same rules).
   const refresh = () => {
     if (!formRef.current) return;
     const values = formValues(new FormData(formRef.current));
+    const mine = ++request.current;
+    setCurrencies({
+      account: accounts.find((a) => String(a.id) === values.accountId)?.baseCurrency ?? '',
+      quote: (values.quoteCurrency ?? '').trim().toUpperCase(),
+    });
     if (preview) {
       setChecking(true);
       preview(values)
-        .then(setVerdict)
-        .catch(() => setVerdict(null))
-        .finally(() => setChecking(false));
+        .then((v) => {
+          if (mine !== request.current) return;
+          setVerdict(v);
+          setCheckFailed(false);
+        })
+        .catch(() => {
+          if (mine !== request.current) return;
+          setVerdict(null); // never leave an old verdict next to new values
+          setCheckFailed(true);
+        })
+        .finally(() => {
+          if (mine === request.current) setChecking(false);
+        });
     }
     if (sizeHelper) {
       // Nothing to suggest until an entry price is typed (no list of "missing" messages up front).
       const entry = values.status === 'open' ? values.entryPrice : values.plannedEntry;
-      if (!entry || entry.trim() === '') setSuggestion(null);
-      else {
+      if (!entry || entry.trim() === '') {
+        setSuggestion(null);
+        setSuggestionFailed(false);
+      } else {
         sizeHelper(values)
-          .then(setSuggestion)
-          .catch(() => setSuggestion(null));
+          .then((s) => {
+            if (mine !== request.current) return;
+            setSuggestion(s);
+            setSuggestionFailed(false);
+          })
+          .catch(() => {
+            if (mine !== request.current) return;
+            setSuggestion(null);
+            setSuggestionFailed(true);
+          });
       }
     }
   };
@@ -243,7 +275,12 @@ export function TradeForm({
           {sizeHelper && (
             <div className="notice notice-note" aria-live="polite">
               <strong>Position-size helper</strong>
-              {suggestion === null ? (
+              {suggestionFailed ? (
+                <p className="small">
+                  The size helper could not run just now. You can still type a size yourself; the
+                  risk engine judges the plan when you save.
+                </p>
+              ) : suggestion === null ? (
                 <p className="small">
                   Type the entry price and the stop-loss to see the largest size inside your
                   per-trade limit.
@@ -253,8 +290,8 @@ export function TradeForm({
                   <p>
                     The largest size inside your per-trade limit ({suggestion.riskPercent} % of
                     equity) is <strong>{suggestion.size}</strong>. Risk at the stop:{' '}
-                    {suggestion.riskAmount} ({suggestion.riskPercentUsed} % of equity); trade value{' '}
-                    {suggestion.notional}.
+                    {suggestion.riskAmount} {currencies.account} ({suggestion.riskPercentUsed} % of
+                    equity); trade value {suggestion.notional} {currencies.quote}.
                   </p>
                   <button type="button" className="secondary" onClick={useSuggestedSize}>
                     Use this size
@@ -308,7 +345,12 @@ export function TradeForm({
       {preview && (
         <section aria-live="polite" className="notice notice-note">
           <strong>Risk check{checking ? ' (checking…)' : ''}</strong>
-          {verdict === null ? (
+          {checkFailed ? (
+            <p role="alert">
+              The live risk check could not run just now. It is NOT approving this plan: the risk
+              engine still judges it when you save.
+            </p>
+          ) : verdict === null ? (
             <p>Fill in the plan to see the risk check.</p>
           ) : (
             <>
@@ -338,9 +380,10 @@ export function TradeForm({
                 </ul>
               )}
               <p className="small">
-                Risk on this trade: {verdict.numbers.riskAmount ?? 'n/a'} (
-                {verdict.numbers.riskPercent ?? 'n/a'} % of equity {verdict.numbers.equity ?? 'n/a'}
-                ){' | '}Open risk after: {verdict.numbers.openRiskAfter ?? 'n/a'} (
+                Risk on this trade: {verdict.numbers.riskAmount ?? 'n/a'} {currencies.account} (
+                {verdict.numbers.riskPercent ?? 'n/a'} % of equity {verdict.numbers.equity ?? 'n/a'}{' '}
+                {currencies.account}){' | '}Open risk after:{' '}
+                {verdict.numbers.openRiskAfter ?? 'n/a'} {currencies.account} (
                 {verdict.numbers.openRiskAfterPercent ?? 'n/a'} %){' | '}Open trades after:{' '}
                 {verdict.numbers.openTradesAfter} of {verdict.numbers.maxOpenTrades ?? 'n/a'}
                 {' | '}Reward-to-risk: {verdict.numbers.rewardToRisk ?? 'n/a'}

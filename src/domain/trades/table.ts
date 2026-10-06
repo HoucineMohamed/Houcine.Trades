@@ -7,7 +7,16 @@ import { DIRECTIONS, STATUSES, type Direction, type TradeStatus } from './types'
  * the ORDER of rows; no amount is calculated here.
  */
 
-export const SORT_KEYS = ['created', 'opened', 'closed', 'symbol', 'status', 'pnl', 'r'] as const;
+export const SORT_KEYS = [
+  'created',
+  'date',
+  'opened',
+  'closed',
+  'symbol',
+  'status',
+  'pnl',
+  'r',
+] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 export type SortDir = 'asc' | 'desc';
 
@@ -36,7 +45,15 @@ export const DEFAULT_QUERY: JournalQuery = {
 };
 
 /** Reads untrusted URL parameters. Anything unknown or malformed falls back to the default. */
-export function parseJournalQuery(raw: Record<string, string | undefined>): JournalQuery {
+export function parseJournalQuery(
+  input: Record<string, string | string[] | undefined>,
+): JournalQuery {
+  // A repeated parameter (?symbol=a&symbol=b) arrives as a list: only the first value is used.
+  const raw: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(input)) {
+    const first = Array.isArray(value) ? value[0] : value;
+    raw[key] = typeof first === 'string' ? first : undefined;
+  }
   const status = STATUSES.find((s) => s === raw.status) ?? null;
   const direction = DIRECTIONS.find((d) => d === raw.direction) ?? null;
   const symbol = (raw.symbol ?? '').trim().slice(0, 30);
@@ -102,6 +119,11 @@ export function sortJournalRows<T extends SortableRow>(
   const sign = dir === 'asc' ? 1 : -1;
   const specs: Record<SortKey, { value: (r: T) => string | null; compare: Compare<T> }> = {
     created: { value: (r) => r.createdAt, compare: byText((r: T) => r.createdAt) },
+    // the date the journal shows: the close time of a closed trade, else the opening time
+    date: {
+      value: (r) => (r.status === 'closed' ? r.closedAt : r.openedAt),
+      compare: byText((r: T) => (r.status === 'closed' ? r.closedAt : r.openedAt)),
+    },
     opened: { value: (r) => r.openedAt, compare: byText((r: T) => r.openedAt) },
     closed: { value: (r) => r.closedAt, compare: byText((r: T) => r.closedAt) },
     symbol: {

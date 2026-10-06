@@ -43,6 +43,8 @@ describe('listJournal', () => {
       'ETHUSDT',
     ]);
     expect(listJournal(db, 1, q({ symbol: 'ethusdt' })).page.total).toBe(1);
+    expect(listJournal(db, 1, q({ symbol: 'eth' })).page.total).toBe(1); // "contains", not exact
+    expect(listJournal(db, 1, q({ symbol: 'doge' })).page.total).toBe(0);
     expect(listJournal(db, 1, q({ setup: String(setup.id) })).page.items[0]?.setupName).toBe(
       'Breakout',
     );
@@ -180,5 +182,43 @@ describe('parseVerdict', () => {
       expect(v.violations).toEqual([]);
       expect(v.numbers).toBeNull();
     }
+  });
+});
+
+describe('parseVerdict: damage is reported, never hidden', () => {
+  const row = (snapshotJson: string): RiskVerdictRow => ({
+    id: 1,
+    tradeId: 1,
+    stage: 'created',
+    approved: 0,
+    violationCodes: '[]',
+    warningCodes: '[]',
+    snapshotJson,
+    overrideReason: 'because',
+    createdAt: '2026-03-10T12:00:00.000Z',
+  });
+  it('a healthy snapshot is not damaged', () => {
+    expect(
+      parseVerdict(
+        row(JSON.stringify({ violations: [], warnings: [], numbers: { riskAmount: '1' } })),
+      ).damaged,
+    ).toBe(false);
+    expect(parseVerdict(row('{}')).damaged).toBe(false); // an old snapshot without lists
+  });
+  it.each([
+    ['broken JSON', '{nope'],
+    ['not an object', '"text"'],
+    ['an array', '[]'],
+    ['violations that are not a list', '{"violations":"x"}'],
+    ['numbers that are an array', '{"numbers":[]}'],
+    ['a violation without a code', '{"violations":[{"message":"m"},{"code":"A","message":"ok"}]}'],
+    ['a warning that is a string', '{"warnings":["x"]}'],
+  ])('%s is flagged as damaged', (_name, json) => {
+    expect(parseVerdict(row(json)).damaged).toBe(true);
+  });
+  it('the readable part is still returned next to the damage flag', () => {
+    const v = parseVerdict(row('{"violations":[{"message":"m"},{"code":"A","message":"ok"}]}'));
+    expect(v.violations).toEqual([{ code: 'A', message: 'ok' }]);
+    expect(v.damaged).toBe(true);
   });
 });

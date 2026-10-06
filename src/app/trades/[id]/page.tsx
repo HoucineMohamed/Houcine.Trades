@@ -10,26 +10,36 @@ import { utcToLocalInput } from '../../_lib/form';
 import { MetricAmount, MetricR, MetricTile, Signed } from '../../_lib/ui';
 import { cancelTradeAction, closeTradeAction, openTradeAction } from '../actions';
 
-const NUMBER_LABELS: [string, string][] = [
-  ['equity', 'Equity'],
-  ['riskAmount', 'Risk at the stop'],
-  ['riskPercent', 'Risk, % of equity'],
-  ['riskLimitAmount', 'Per-trade limit'],
-  ['openRiskBefore', 'Open risk before'],
-  ['openRiskAfter', 'Open risk after'],
-  ['openRiskAfterPercent', 'Open risk after, % of equity'],
-  ['openRiskLimitAmount', 'Open-risk limit'],
-  ['openTradesAfter', 'Open trades after'],
-  ['maxOpenTrades', 'Open-trades limit'],
-  ['rewardToRisk', 'Reward-to-risk'],
+type NumberKind = 'money' | 'percent' | 'count' | 'ratio';
+const NUMBER_LABELS: [string, string, NumberKind][] = [
+  ['equity', 'Equity', 'money'],
+  ['riskAmount', 'Risk at the stop', 'money'],
+  ['riskPercent', 'Risk, % of equity', 'percent'],
+  ['riskLimitAmount', 'Per-trade limit', 'money'],
+  ['openRiskBefore', 'Open risk before', 'money'],
+  ['openRiskAfter', 'Open risk after', 'money'],
+  ['openRiskAfterPercent', 'Open risk after, % of equity', 'percent'],
+  ['openRiskLimitAmount', 'Open-risk limit', 'money'],
+  ['openTradesAfter', 'Open trades after', 'count'],
+  ['maxOpenTrades', 'Open-trades limit', 'count'],
+  ['rewardToRisk', 'Reward-to-risk', 'ratio'],
 ];
+
+/** A stored verdict number for display: money in the account currency, percent with its sign. */
+function numberText(value: unknown, kind: NumberKind, currency: string): string {
+  const text = String(value);
+  if (kind === 'money')
+    return /^-?\d+(\.\d+)?$/.test(text) ? `${formatMoney(text)} ${currency}` : text;
+  if (kind === 'percent') return `${text} %`;
+  return text;
+}
 
 const STAGE = {
   created: 'When the trade was logged',
   opened: 'When the trade was opened',
 } as const;
 
-function Verdict({ v }: { v: VerdictView }) {
+function Verdict({ v, currency }: { v: VerdictView; currency: string }) {
   const numbers = NUMBER_LABELS.filter(([k]) => v.numbers && v.numbers[k] != null);
   return (
     <div className="verdict">
@@ -37,6 +47,13 @@ function Verdict({ v }: { v: VerdictView }) {
         <strong>{STAGE[v.stage as keyof typeof STAGE] ?? v.stage}</strong> ({formatUtc(v.createdAt)}
         ): {v.approved ? 'the risk engine approved the plan.' : 'the risk engine refused the plan.'}
       </p>
+      {v.damaged && (
+        <p className="notice notice-alert">
+          The stored snapshot of this verdict is damaged or incomplete, so the reasons and numbers
+          below may be missing parts. The approved or refused result above comes from its own
+          record.
+        </p>
+      )}
       {v.overrideReason && (
         <p>
           <span className="badge badge-override">override</span> It was logged anyway. Reason given:{' '}
@@ -63,10 +80,10 @@ function Verdict({ v }: { v: VerdictView }) {
       )}
       {numbers.length > 0 && (
         <dl className="facts">
-          {numbers.map(([k, label]) => (
+          {numbers.map(([k, label, kind]) => (
             <div key={k} className="contents">
               <dt>{label}</dt>
-              <dd>{String(v.numbers?.[k])}</dd>
+              <dd>{numberText(v.numbers?.[k], kind, currency)}</dd>
             </div>
           ))}
         </dl>
@@ -255,7 +272,9 @@ export default guardedPage(
                 existed).
               </p>
             ) : (
-              detail.verdicts.map((v) => <Verdict key={v.id} v={v} />)
+              detail.verdicts.map((v) => (
+                <Verdict key={v.id} v={v} currency={account.baseCurrency} />
+              ))
             )}
           </div>
         </section>

@@ -138,7 +138,8 @@ npm run dev
 The setting only lasts for that terminal window. When you are done, close the window (or run
 `unset DATABASE_URL`, PowerShell: `Remove-Item Env:DATABASE_URL`) and start the app again in a normal
 window to use your real journal. To start the demo again, delete `data/demo.db` and repeat. A demo
-file that already has accounts is never seeded twice.
+file that already has accounts or an owner is never seeded (do the steps in the order above: seed
+first, then create the owner).
 
 ## Database and migrations
 

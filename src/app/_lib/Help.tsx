@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { getHelp, type HelpKey } from './help';
+import { getHelp, HELP, type HelpKey } from './help';
 import { inlineTokens, type Block } from './help-parse';
 
 function Inline({ text }: { text: string }) {
@@ -44,9 +44,14 @@ function Blocks({ blocks }: { blocks: Block[] }) {
 export function Help({ id, label = 'What does this mean?' }: { id: HelpKey; label?: string }) {
   const blocks = getHelp(id);
   if (!blocks) return null;
+  const source = HELP[id];
+  const topic = source ? (source.row ?? source.heading) : String(id);
   return (
     <details className="help">
-      <summary>{label}</summary>
+      <summary>
+        {label}
+        <span className="visually-hidden"> about: {topic}</span>
+      </summary>
       <div className="help-body">
         <Blocks blocks={blocks} />
       </div>

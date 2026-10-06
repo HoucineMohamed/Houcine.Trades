@@ -73,6 +73,8 @@ function readDoc(file: DocFile): string | null {
   try {
     return fs.readFileSync(path.join(process.cwd(), 'docs', `${file}.md`), 'utf8');
   } catch {
+    // Not silent: the explanations would otherwise vanish without a trace.
+    console.warn(`Help texts unavailable: cannot read docs/${file}.md from ${process.cwd()}`);
     return null;
   }
 }

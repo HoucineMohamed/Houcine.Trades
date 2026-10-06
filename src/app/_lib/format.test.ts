@@ -69,8 +69,11 @@ describe('resultKind and formatSigned', () => {
     expect(formatSigned('-0.000000001')).toMatchObject({ text: '0', kind: 'flat' });
     expect(formatSigned('0.004', 2)).toMatchObject({ text: '0', kind: 'flat' });
   });
-  it('invalid text is shown as is, as break-even, never throws', () => {
-    expect(formatSigned('oops')).toEqual({ text: 'oops', kind: 'flat', word: 'break-even' });
+  it('invalid text is never called break-even: it is shown as unreadable, and never throws', () => {
+    expect(formatSigned('oops')).toEqual({ text: 'oops', kind: 'flat', word: 'unreadable' });
+    expect(formatSigned('')).toEqual({ text: 'n/a', kind: 'flat', word: 'unreadable' });
+    expect(formatMoneySigned('NaN')).toMatchObject({ word: 'unreadable' });
+    expect(formatR('')).toMatchObject({ text: 'n/a', word: 'unreadable' });
   });
   it('uses no advice words', () => {
     const words = [formatSigned('1'), formatSigned('-1'), formatSigned('0')].map((s) => s.word);
@@ -159,5 +162,23 @@ describe('formatMoney and formatMoneySigned', () => {
     expect(formatMoneySigned('0.000000004')).toMatchObject({ text: '0', kind: 'flat' });
     expect(formatMoneySigned('-0.00000002')).toMatchObject({ text: '−0.00000002', kind: 'loss' });
     expect(formatMoneySigned('oops')).toMatchObject({ text: 'oops', kind: 'flat' });
+  });
+});
+
+describe('rounding carries and extremes', () => {
+  it('a carry changes the grouping: 999.995 -> 1,000.00', () => {
+    expect(formatMoney('999.995')).toBe('1,000.00'); // half-even: 999.99|5 -> 1000.00
+    expect(formatMoney('9999.995')).toBe('10,000.00');
+  });
+  it('rounds to a whole number below 1 only when the digits say so', () => {
+    expect(formatMoney('-0.999999999')).toBe('-1');
+    expect(formatMoneySigned('-0.999999999').text).toBe('\u22121');
+  });
+  it('very large amounts keep every digit', () => {
+    expect(formatMoney('123456789012345678901234.5')).toBe('123,456,789,012,345,678,901,234.50');
+  });
+  it('a zero R keeps its decimals and has no sign', () => {
+    expect(formatR('-0.0000')).toMatchObject({ text: '0.0000 R', kind: 'flat' });
+    expect(formatR('0.0000')).toMatchObject({ text: '0.0000 R', kind: 'flat' });
   });
 });

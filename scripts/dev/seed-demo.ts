@@ -10,7 +10,9 @@ import { SeedRefusedError } from './guard';
  * Fills an EMPTY database with clearly named DEMO data so the dashboard can be looked at: one
  * "DEMO Paper Account", a few setups, closed, open, planned and cancelled trades, one trade in
  * another currency, one with fees in another currency, and one example override. Deterministic
- * (a fixed pseudo-random sequence) and relative to `now`, so "today" has data. It only inserts
+ * (a fixed pseudo-random sequence) and relative to `now`. Prices and sizes are made with JS numbers and
+ * `toFixed` ON PURPOSE: this only writes made-up numbers into a demo file; real money is never
+ * handled this way (project money rule). so "today" has data. It only inserts
  * demo rows; nothing here is ever shown as advice or real.
  */
 
@@ -35,6 +37,29 @@ const SYMBOLS = [
 // Results in R, chosen so the demo never reaches a drawdown or daily-loss halt.
 const R_CHOICES = [-1, -1, -1, -0.5, 0, 0.5, 1, 1, 1.5, 2, 2, 3, -1.5];
 const DAY = 86_400_000;
+
+/**
+ * Refuses a database that is not a fresh demo file: one that already has accounts or an owner.
+ * Run it BEFORE migrating, so a wrong file is never changed at all. A file without tables is fine.
+ */
+export function assertFreshDatabase(db: Db): void {
+  const has = (table: string) =>
+    db.$client
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table) !== undefined;
+  const count = (table: string) =>
+    (db.$client.prepare(`SELECT count(*) AS c FROM ${table}`).get() as { c: number }).c;
+  if (has('accounts') && count('accounts') > 0) {
+    throw new SeedRefusedError(
+      'This database already contains accounts, so nothing was added. Delete the demo file to start again.',
+    );
+  }
+  if (has('owner') && count('owner') > 0) {
+    throw new SeedRefusedError(
+      'This database already has an owner, so it is not a fresh demo file. Nothing was changed. (Seed first, then create the owner.)',
+    );
+  }
+}
 
 export interface SeedSummary {
   accountId: number;

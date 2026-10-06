@@ -12,22 +12,34 @@ import type { HelpKey } from './help';
  * never a judgement. Profit and loss use a neutral colour pair AND a sign AND a word.
  */
 
-function SignedSpan({ s }: { s: SignedText }) {
+function SignedSpan({ s, quiet = false }: { s: SignedText; quiet?: boolean }) {
   const cls =
     s.kind === 'profit' ? 'result-gain' : s.kind === 'loss' ? 'result-loss' : 'result-flat';
   return (
     <span className={cls}>
       {s.text}
-      <span className="result-word">{s.word}</span>
+      {!(quiet && s.kind === 'flat') && <span className="result-word">{s.word}</span>}
     </span>
   );
 }
 
 /** A result (net P&L, today's result) with sign, separators and a neutral word. */
-export function Signed({ value, currency }: { value: string; currency?: string }) {
+/**
+ * `quiet`: a zero is shown as a plain 0 without the word "break-even" (the word belongs to a
+ * single trade's result, not to a sum that happens to be zero).
+ */
+export function Signed({
+  value,
+  currency,
+  quiet = false,
+}: {
+  value: string;
+  currency?: string;
+  quiet?: boolean;
+}) {
   return (
     <>
-      <SignedSpan s={formatMoneySigned(value)} />
+      <SignedSpan s={formatMoneySigned(value)} quiet={quiet} />
       {currency ? <> {currency}</> : null}
     </>
   );
@@ -118,6 +130,7 @@ function Bar({
   label: string;
 }) {
   const bar = usageBar(share);
+  const full = reached === true && !bar.known; // e.g. a limit of 0: reached, but no share to draw
   return (
     <svg
       className="usage-svg"
@@ -127,12 +140,12 @@ function Bar({
       aria-label={label}
     >
       <rect className="bar-track" x="0" y="0" width="100" height="10" />
-      {bar.known && (
+      {(bar.known || full) && (
         <rect
           className={reached || bar.over ? 'bar-fill reached' : 'bar-fill'}
           x="0"
           y="0"
-          width={bar.fill}
+          width={full ? 100 : bar.fill}
           height="10"
         />
       )}
@@ -155,7 +168,8 @@ export function UsageMeter({
   help?: HelpKey;
   measuredAgainst: string;
 }) {
-  const unknown = line.used === null;
+  const { used, limitAmount, usedPercent } = line;
+  const unknown = used === null || limitAmount === null || usedPercent === null;
   const label = unknown
     ? `${name}: cannot be verified`
     : `${name}: ${line.shareOfLimit ?? '?'} % of the limit used`;
@@ -170,7 +184,7 @@ export function UsageMeter({
             <span className="na">cannot be verified</span>
           ) : (
             <>
-              {formatMoney(line.used as string)} of {formatMoney(line.limitAmount as string)}
+              {formatMoney(used)} of {formatMoney(limitAmount)}
               {currency ? ` ${currency}` : ''}
             </>
           )}
@@ -179,11 +193,10 @@ export function UsageMeter({
       <Bar share={line.shareOfLimit} reached={line.reached} label={label} />
       <div className="usage-foot">
         {unknown ? (
-          line.problem
+          (line.problem ?? 'The figures are incomplete, so they are not shown.')
         ) : (
           <>
-            {formatPercent(line.usedPercent as string)} of {measuredAgainst}; the limit is{' '}
-            {line.limitPercent} %.{' '}
+            {formatPercent(usedPercent)} of {measuredAgainst}; the limit is {line.limitPercent} %.{' '}
             {line.reached ? (
               <strong>Limit reached.</strong>
             ) : (

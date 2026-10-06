@@ -92,3 +92,20 @@ describe('loadDashboard', () => {
     expect(count()).toBe(before);
   });
 });
+
+describe('loadDashboard ordering', () => {
+  it('open trades: newest opened first, equal times by id (newest first), no time last', () => {
+    const db = riskDb();
+    const a = openTrade(db, { openedAt: '2026-03-10T09:00:00Z' });
+    const b = openTrade(db, { openedAt: '2026-03-10T09:00:00Z' });
+    const c = openTrade(db, { openedAt: '2026-03-10T10:00:00Z' });
+    const d = loadDashboard(db, 1, NOW);
+    expect(d.openTrades.map((t) => t.id)).toEqual([c.id, b.id, a.id]);
+  });
+  it('recent closed trades with the same closed time are ordered by id, newest first', () => {
+    const db = riskDb();
+    const x = closedTrade(db, { pnl: 1, closedAt: '2026-03-05T10:00:00.000Z' });
+    const y = closedTrade(db, { pnl: 2, closedAt: '2026-03-05T10:00:00.000Z' });
+    expect(loadDashboard(db, 1, NOW).recentClosed.map((t) => t.id)).toEqual([y.id, x.id]);
+  });
+});

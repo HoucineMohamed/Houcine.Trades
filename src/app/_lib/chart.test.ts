@@ -150,6 +150,38 @@ describe('histogramGeometry', () => {
   });
 });
 
+describe('equityGeometry: harder curves', () => {
+  it('equity that dips below the start: the low label is the dip, the start line is not at the bottom, the shaded shape starts on the peak line', () => {
+    const c = curve({
+      endingEquity: '900',
+      peakEquity: '1000',
+      points: [point(1, '900', '1000', '100')],
+    });
+    const g = equityGeometry(c, frame);
+    expect(g.lowLabel).toBe('900');
+    expect(g.highLabel).toBe('1000');
+    expect(g.startY).toBe(0); // the start (1000) is the top of the scale
+    expect(g.line).toBe('M 0 0 L 100 100');
+    expect(g.drawdown.startsWith('M 0 0 L 100 0')).toBe(true);
+  });
+  it('numbers too large for the drawing never produce NaN or Infinity in a path', () => {
+    const huge = '9'.repeat(400);
+    const g = equityGeometry(
+      curve({ endingEquity: huge, peakEquity: huge, points: [point(1, huge, huge, '0')] }),
+      frame,
+    );
+    expect(g.line).not.toMatch(/NaN|Infinity/);
+    expect(g.drawdown).not.toMatch(/NaN|Infinity/);
+  });
+});
+
+describe('histogramGeometry: no buckets', () => {
+  it('does not crash', () => {
+    const g = histogramGeometry([], frame);
+    expect(g).toMatchObject({ maxCount: 0, bars: [], zeroX: null });
+  });
+});
+
 describe('usageBar', () => {
   it('fills by the share of the limit', () => {
     expect(usageBar('0.00')).toEqual({ fill: 0, over: false, known: true });
@@ -159,6 +191,11 @@ describe('usageBar', () => {
   it('above 100 % the bar is full and flagged over', () => {
     expect(usageBar('100.01')).toEqual({ fill: 100, over: true, known: true });
     expect(usageBar('250')).toEqual({ fill: 100, over: true, known: true });
+  });
+  it('blank, NaN, Infinity and signs are unknown, never a verified zero', () => {
+    for (const bad of ['', ' ', 'NaN', 'Infinity', '-0', '+5', '1e2', '5.', '.5']) {
+      expect(usageBar(bad), JSON.stringify(bad)).toEqual({ fill: 0, over: false, known: false });
+    }
   });
   it('unknown or broken input is shown as unknown, never as empty', () => {
     expect(usageBar(null)).toEqual({ fill: 0, over: false, known: false });

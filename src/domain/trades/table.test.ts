@@ -146,3 +146,60 @@ describe('paginate', () => {
     expect(paginate(items.slice(0, 26), 1).pages).toBe(2);
   });
 });
+
+describe('more table cases', () => {
+  it('repeated URL parameters (arrays) never throw: the first value is used', () => {
+    const q = parseJournalQuery({
+      symbol: ['btc', 'eth'],
+      page: ['2', '3'],
+      setup: ['1', '2'],
+      status: ['closed', 'open'],
+      sort: ['pnl'],
+    });
+    expect(q).toMatchObject({ symbol: 'btc', page: 2, setupId: 1, status: 'closed', sort: 'pnl' });
+    expect(parseJournalQuery({ symbol: [] }).symbol).toBeNull();
+  });
+  it('rows without a date come last for opened, closed and date, in both directions', () => {
+    const rows = [
+      row(1),
+      row(2, { openedAt: '2026-03-02T00:00:00.000Z' }),
+      row(3, { openedAt: '2026-03-01T00:00:00.000Z' }),
+    ];
+    expect(ids(sortJournalRows(rows, 'opened', 'desc'))).toEqual([2, 3, 1]);
+    expect(ids(sortJournalRows(rows, 'opened', 'asc'))).toEqual([3, 2, 1]);
+    const closed = [row(1), row(2, { closedAt: '2026-03-02T00:00:00.000Z' })];
+    expect(ids(sortJournalRows(closed, 'closed', 'asc'))).toEqual([2, 1]);
+  });
+  it('"date" is the close time of a closed trade and the opening time of the others', () => {
+    const rows = [
+      row(1, {
+        status: 'closed',
+        openedAt: '2026-01-01T00:00:00.000Z',
+        closedAt: '2026-03-05T00:00:00.000Z',
+      }),
+      row(2, { status: 'open', openedAt: '2026-03-03T00:00:00.000Z' }),
+      row(3, { status: 'planned' }),
+    ];
+    expect(ids(sortJournalRows(rows, 'date', 'desc'))).toEqual([1, 2, 3]);
+    expect(ids(sortJournalRows(rows, 'date', 'asc'))).toEqual([2, 1, 3]);
+  });
+  it('two rows with no value are ordered by id, newest first', () => {
+    expect(ids(sortJournalRows([row(1), row(2)], 'pnl', 'asc'))).toEqual([2, 1]);
+  });
+  it('an unknown status sorts after every known one', () => {
+    const rows = [
+      row(1, { status: 'weird' }),
+      row(2, { status: 'cancelled' }),
+      row(3, { status: 'planned' }),
+    ];
+    expect(ids(sortJournalRows(rows, 'status', 'asc'))).toEqual([3, 2, 1]);
+  });
+  it('symbols that differ only in case tie, then newest id first', () => {
+    const rows = [row(1, { symbol: 'btc' }), row(2, { symbol: 'BTC' })];
+    expect(ids(sortJournalRows(rows, 'symbol', 'asc'))).toEqual([2, 1]);
+  });
+  it('a setup id is read as written: "007" is 7 and "0" is 0', () => {
+    expect(parseJournalQuery({ setup: '007' }).setupId).toBe(7);
+    expect(parseJournalQuery({ setup: '0' }).setupId).toBe(0);
+  });
+});

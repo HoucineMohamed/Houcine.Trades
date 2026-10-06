@@ -12,7 +12,7 @@ import {
 } from '@/domain/risk';
 import { computeRiskUsage } from '@/domain/risk';
 import { selectedAccount } from '../_lib/account';
-import { formatMoney } from '../_lib/format';
+import { formatMoney, formatUtc } from '../_lib/format';
 import { guardedPage } from '../_lib/guard';
 import { Help } from '../_lib/Help';
 import { CountMeter, MetricTile, Signed, UsageMeter } from '../_lib/ui';
@@ -72,7 +72,7 @@ export default guardedPage(
             <h2>No account yet</h2>
             <p>
               <Link href="/accounts">Create a paper account</Link> first. Its risk limits start with
-              safe defaults.
+              default values.
             </p>
           </div>
         ) : (
@@ -144,7 +144,9 @@ function AccountRisk({
               </p>
               <p>{h.message}</p>
               {h.since && <p>Began: {formatLocal(h.since)} (local time)</p>}
-              {h.clearsAt && <p>Clears by itself at {h.clearsAt} (next UTC midnight).</p>}
+              {h.clearsAt && (
+                <p>Clears by itself at {formatUtc(h.clearsAt)} (next UTC midnight).</p>
+              )}
               {h.kind === 'drawdown' && (
                 <p>
                   {h.resetAllowedNow ? (
@@ -153,7 +155,7 @@ function AccountRisk({
                     <>
                       <strong>Reset not possible yet.</strong> Time remaining:{' '}
                       <strong>{formatRemaining(h.resetRemainingMs ?? 0)}</strong> (available at{' '}
-                      {h.resetAvailableAt}). An earlier attempt is refused and logged.{' '}
+                      {formatUtc(h.resetAvailableAt)}). An earlier attempt is refused and logged.{' '}
                       <Help id="drawdownDetails" />
                     </>
                   )}
@@ -261,30 +263,30 @@ function AccountRisk({
               <MetricTile label={`Current equity (${base})`} small>
                 {formatMoney(ctx.equity)}
               </MetricTile>
-              <MetricTile label="Peak since the last baseline" small>
+              <MetricTile label={`Peak since the last baseline (${base})`} small>
                 {ctx.peakEquity ? formatMoney(ctx.peakEquity) : 'n/a'}
               </MetricTile>
-              <MetricTile label="Fall from that peak" small>
+              <MetricTile label={`Fall from that peak (${base})`} small>
                 {ctx.fallFromPeak ? formatMoney(ctx.fallFromPeak) : 'n/a'}
               </MetricTile>
-              <MetricTile label="Drawdown baseline" small>
+              <MetricTile label={`Drawdown baseline (${base})`} small>
                 {ctx.baselineEquity ? formatMoney(ctx.baselineEquity) : 'n/a'}
               </MetricTile>
-              <MetricTile label="Equity at the start of today (UTC)" help="utcDay" small>
+              <MetricTile label={`Equity at the start of today (${base}, UTC)`} help="utcDay" small>
                 {ctx.dayStartEquity
                   ? formatMoney(ctx.dayStartEquity)
                   : `n/a (${ctx.dayStartProblem})`}
               </MetricTile>
               <MetricTile label="Net result counted as today" small>
-                <Signed value={ctx.todayNetPnl} />
+                <Signed value={ctx.todayNetPnl} currency={base} />
               </MetricTile>
               <MetricTile label="Open trades" small>
                 {ctx.openTrades.length}
               </MetricTile>
             </div>
             <p className="small">
-              UTC day started {ctx.dayStart}. Unrealised results of open trades are not counted (no
-              live prices).
+              UTC day started {formatUtc(ctx.dayStart)}. Unrealised results of open trades are not
+              counted (no live prices).
             </p>
           </div>
         )}

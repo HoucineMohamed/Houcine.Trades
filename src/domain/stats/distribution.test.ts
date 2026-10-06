@@ -81,4 +81,13 @@ describe('R distribution', () => {
     expect(forward.total).toBe(10);
     expect(reversed.buckets.map((b) => b.count)).toEqual(forward.buckets.map((b) => b.count));
   });
+
+  it('edges next to the top and around zero', () => {
+    const d = distribution([
+      rTrade(1, '114.9995'), //  2.9999 -> "2.5 to 3"
+      rTrade(2, '100'), //       0.0000 -> "0 to 0.5"
+      rTrade(3, '99.9995'), //  -0.0001 -> "-0.5 to 0"
+    ]);
+    expect(countsByLabel(d)).toEqual({ '2.5 to 3': 1, '0 to 0.5': 1, '-0.5 to 0': 1 });
+  });
 });

@@ -59,6 +59,11 @@ export interface EquityGeometry {
 const lower = (a: string, b: string) => (new Dec(a).lte(b) ? a : b);
 const higher = (a: string, b: string) => (new Dec(a).gte(b) ? a : b);
 
+const finite = (text: string) => {
+  const n = Number(text);
+  return Number.isFinite(n) ? n : 0;
+};
+
 export function equityGeometry(curve: EquityCurve, frame: Frame): EquityGeometry {
   const equities = [curve.startingEquity, ...curve.points.map((p) => p.equity)];
   const peaks = [curve.startingEquity, ...curve.points.map((p) => p.peak)];
@@ -69,13 +74,13 @@ export function equityGeometry(curve: EquityCurve, frame: Frame): EquityGeometry
   for (const e of equities) lowLabel = lower(lowLabel, e);
   for (const p of peaks) highLabel = higher(highLabel, p);
 
-  const y = scaleLinear(Number(lowLabel), Number(highLabel), frame.bottom, frame.top);
+  const y = scaleLinear(finite(lowLabel), finite(highLabel), frame.bottom, frame.top);
   const n = equities.length - 1;
   const x = (i: number) =>
     n === 0 ? (frame.left + frame.right) / 2 : frame.left + (i / n) * (frame.right - frame.left);
 
-  const eq = equities.map((e, i) => ({ x: x(i), y: y(Number(e)) }));
-  const pk = peaks.map((p, i) => ({ x: x(i), y: y(Number(p)) }));
+  const eq = equities.map((e, i) => ({ x: x(i), y: y(finite(e)) }));
+  const pk = peaks.map((p, i) => ({ x: x(i), y: y(finite(p)) }));
   const line = eq.map((p, i) => `${i === 0 ? 'M' : 'L'} ${pt(p.x, p.y)}`).join(' ');
 
   const hasDrawdown = curve.points.some((p) => !new Dec(p.fallFromPeak).isZero());
@@ -90,7 +95,7 @@ export function equityGeometry(curve: EquityCurve, frame: Frame): EquityGeometry
     frame,
     line,
     drawdown,
-    startY: r2(y(Number(curve.startingEquity))),
+    startY: r2(y(finite(curve.startingEquity))),
     highLabel,
     lowLabel,
     dots: eq.map((p, i) => ({ x: r2(p.x), y: r2(p.y), tradeId: ids[i] ?? null })),
@@ -157,8 +162,10 @@ export interface UsageBar {
 
 /** `shareOfLimit` is the engine's text ("50.00"); null means it could not be verified. */
 export function usageBar(shareOfLimit: string | null): UsageBar {
-  if (shareOfLimit === null) return { fill: 0, over: false, known: false };
+  if (shareOfLimit === null || !/^\d+(\.\d+)?$/.test(shareOfLimit)) {
+    return { fill: 0, over: false, known: false };
+  }
   const n = Number(shareOfLimit);
-  if (!Number.isFinite(n) || n < 0) return { fill: 0, over: false, known: false };
+  if (!Number.isFinite(n)) return { fill: 0, over: false, known: false };
   return { fill: r2(Math.min(100, n)), over: n > 100, known: true };
 }

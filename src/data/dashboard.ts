@@ -4,7 +4,7 @@ import { computeAccountStats, type AccountStats } from '@/domain/stats';
 import { getAccount, type Account } from './accounts';
 import type { Reader } from './client';
 import { NotFoundError } from './errors';
-import { resultsByTrade } from './journal-view';
+import { resultsByTrade, skippedByTrade } from './journal-view';
 import { loadRiskContext } from './risk';
 import { trades } from './schema';
 import { loadStatsInput } from './stats';
@@ -36,6 +36,8 @@ export interface DashboardClosedTrade {
   closedAt: string | null;
   netPnl: string | null;
   netR: string | null;
+  /** Why the stats engine could not use this closed trade, or null. */
+  skippedReason: string | null;
 }
 
 export interface Dashboard {
@@ -57,6 +59,7 @@ export function loadDashboard(db: Reader, accountId: number, now: Date = new Dat
   const risk = loadRiskContext(db, accountId, now);
   const stats = computeAccountStats(loadStatsInput(db, accountId));
   const results = resultsByTrade(stats);
+  const skipped = skippedByTrade(stats);
 
   const rows = db.select().from(trades).where(eq(trades.accountId, accountId)).all();
   const counts = {
@@ -68,7 +71,13 @@ export function loadDashboard(db: Reader, accountId: number, now: Date = new Dat
 
   const openTrades: DashboardOpenTrade[] = rows
     .filter((t) => t.status === 'open')
-    .sort((a, b) => ((a.openedAt ?? '') < (b.openedAt ?? '') ? 1 : -1))
+    .sort((a, b) => {
+      // newest first, trades without an opened time last, ties by id (newest first)
+      if (a.openedAt === b.openedAt) return b.id - a.id;
+      if (a.openedAt === null) return 1;
+      if (b.openedAt === null) return -1;
+      return a.openedAt < b.openedAt ? 1 : -1;
+    })
     .map((t) => {
       const r = openTradeRisk(
         {
@@ -110,6 +119,7 @@ export function loadDashboard(db: Reader, accountId: number, now: Date = new Dat
       closedAt: t.closedAt,
       netPnl: results.get(t.id)?.netPnl ?? null,
       netR: results.get(t.id)?.netR.value ?? null,
+      skippedReason: skipped.get(t.id)?.reason ?? null,
     }));
 
   return {

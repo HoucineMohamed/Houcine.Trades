@@ -93,6 +93,10 @@
 .badge-note {
   background: var(--note-soft);
 }
+.badge-unverified {
+  background: var(--alert-soft);
+  border-color: var(--alert);
+}
 .badge-override {
   background: var(--alert-soft);
   border-color: var(--alert);
