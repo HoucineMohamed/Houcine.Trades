@@ -448,6 +448,7 @@ main.narrow {
 
 /* ---- tables and journal ---------------------------------------------------------------------- */
 .table-wrap {
+  position: relative; /* keeps visually-hidden text inside the scrolling box */
   overflow-x: auto;
   border: var(--rule-width) solid var(--rule);
   border-radius: var(--radius-sm);
