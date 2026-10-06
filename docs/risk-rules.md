@@ -30,7 +30,7 @@ first one.
 | **Stop on the correct side** (`STOP_WRONG_SIDE`)                         | Long: stop below the entry. Short: stop above the entry. Equal to the entry is refused too.                          | A stop on the wrong side would close the trade at once, or never protect you.                                                                                                                  |
 | **Target on the correct side** (`TARGET_WRONG_SIDE`)                     | Long: target above the entry. Short: below.                                                                          | A target on the wrong side makes the reward-to-risk number meaningless.                                                                                                                        |
 | **Valid plan** (`INVALID_PLAN`)                                          | Entry price and size must be numbers above 0, direction must be long or short.                                       | The risk cannot be calculated from nonsense.                                                                                                                                                   |
-| **Max risk per trade** (`MAX_RISK_PER_TRADE`)                            | Money lost if the stop is hit (`\|entry − stop\| × size`) must not exceed **1 %** of current equity.                 | One bad trade must never hurt much. 1 % means you can lose many trades in a row and still be in the game.                                                                                      |
+| **Max risk per trade** (`MAX_RISK_PER_TRADE`)                            | Money lost if the stop is hit (`\|entry − stop\| × size`) must not exceed **1 %** of current equity.                 | One losing trade must never cost much. 1 % means you can lose many trades in a row and still be in the game.                                                                                   |
 | **Max total open risk** (`MAX_OPEN_RISK`)                                | The risk of all open trades **plus** this plan must not exceed **3 %** of equity.                                    | Several small risks can add up to one big one, especially when markets move together.                                                                                                          |
 | **Max open trades** (`MAX_OPEN_TRADES`)                                  | At most **3** trades open at the same time (this plan counts as one more).                                           | Too many open trades means you cannot watch them all. The limit also stops over-trading.                                                                                                       |
 | **Currency check** (`CURRENCY_MISMATCH`)                                 | The plan's quote currency must equal the account's base currency.                                                    | Equity exists in one currency and the tool never converts currencies, so risk in another currency cannot be verified. The message says: "risk cannot be verified without currency conversion". |
@@ -94,14 +94,13 @@ notes always still work, because they only reduce risk.
 | **Drawdown**             | Equity falls **10 %** (or more) from its peak.                                       | Only when **you** reset it, and **not before 24 hours** after the halt began. |
 | **Manual (kill switch)** | You press "Halt trading now" on the Risk page and give a reason.                     | When you reset it (immediately possible).                                     |
 
-Why these exist: the daily limit stops a bad day from turning into a disaster (people tend to trade
-worse after losing). The drawdown halt forces a pause and a review when something is clearly
-wrong. The kill switch is for when you simply feel you should stop.
+Why these exist: the daily limit caps what one day can cost. The drawdown halt forces a pause and a review when something is clearly
+wrong. The kill switch is for when you decide to stop trading.
 
 ### What "hit" means for a halt
 
 For the **halts**, the limit is **reached**, not exceeded: a loss of exactly 3 % (or a drawdown of
-exactly 10 %) already halts trading. A safety stop should stop at the line, not one step past it.
+exactly 10 %) already halts trading. A safety stop acts at the line, not one step past it.
 The other limits (risk per trade, open risk, number of trades) allow exactly the limit.
 
 ### Drawdown details
@@ -112,8 +111,8 @@ The other limits (risk per trade, open risk, number of trades) allow exactly the
   10 characters, and **24 hours** since the halt began. The Risk page shows the time remaining. If you
   try earlier, it is refused **and the attempt is logged**.
 - A reset makes your **current equity the new baseline**: the drawdown limit is then measured from
-  there. Otherwise the halt would trigger again immediately. **Be honest with yourself:** each reset
-  lets you lose another 10 % from the new starting point. The reset is logged with the old peak and
+  there. Otherwise the halt would trigger again immediately. Each reset
+  allows another 10 % fall from the new starting point. The reset is logged with the old peak and
   the new baseline so nothing is hidden.
 - The halt time is when the trade that caused it was **recorded**, not the closed time you typed.
 - A halt can never be lost by a restart: it is worked out from your trades and the event log, and
@@ -168,8 +167,8 @@ change them in `src/domain/risk/settings.ts` if you disagree.
 
 - **Tighter** (a smaller limit, or a larger minimum reward-to-risk): applies **at once**.
 - **Looser:** saved as a **pending** change that takes effect **24 hours later** (the Risk page shows
-  the time). Why: most people want to loosen limits right after a loss, which is exactly when they
-  should not. A cooling-off delay protects you from yourself.
+  the time). Why: limits are often loosened right after a loss; the cooling-off delay puts a day
+  between the loss and the change.
 - Asking again for the same looser value keeps the original timer. A different looser value restarts
   it. Asking for a tighter or the current value cancels the pending change.
 - Every change is logged. A pending loosening can never hide a halt that already happened.

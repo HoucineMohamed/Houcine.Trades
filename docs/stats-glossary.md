@@ -127,8 +127,8 @@ Not available (`n/a`) if there are no wins, or no losses.
 
 ### Largest win and largest loss
 
-The single best and single worst trade by net result. A very large one can dominate everything
-else, so look at it next to the average.
+The single highest and single lowest trade by net result. A very large one can dominate everything
+else, which is why the average is shown next to it.
 
 ### Average R (before fees)
 
