@@ -192,10 +192,10 @@ export default guardedPage(
                 </tbody>
               </table>
             </div>
-            <p className="small">
+            <div className="small">
               The initial stop is frozen when the trade opens; R is measured against it.{' '}
               <Help id="initialStop" />
-            </p>
+            </div>
           </section>
         </div>
 

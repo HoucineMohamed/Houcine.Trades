@@ -5,11 +5,11 @@ Private, single-owner financial workspace for Houcine: trading journal and stats
 It will run online 24/7 later. The owner is a trading beginner, so **correctness and safety matter
 more than speed**. Built module by module (see `docs/roadmap.md`).
 
-Status: modules 1 (data model and journal), 2 (stats engine), 3 (risk engine) and 4
-(authentication) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
+Status: modules 1 (data model and journal), 2 (stats engine), 3 (risk engine), 4
+(authentication) and 5 (dashboard UI) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
 minimal functional UI, a pure stats engine (`/stats`), a pure risk engine (`/risk`) that approves or
 refuses trade plans, sizes positions and can halt trading, and single-owner login (password +
-authenticator code). No integrations yet. Every statistic is explained in `docs/stats-glossary.md`,
+authenticator code), and a calm dashboard UI (the "Ledger" design). No integrations yet. Every statistic is explained in `docs/stats-glossary.md`,
 every risk rule in `docs/risk-rules.md` and every protection in `docs/security.md`.
 
 > **Authentication exists, hosting does not.** The app still binds to localhost (`dev` and `start`
@@ -25,6 +25,9 @@ Next.js (App Router) + TypeScript (strict, `noUncheckedIndexedAccess`), SQLite v
 
 - `src/app/` UI and routes only. Every page, server action and route handler is wrapped by the guard
   in `src/app/_lib/` (`guardedPage` / `guardedAction` / `guardedRoute`; only `/login` is public)
+- `src/app/styles/` the design tokens (`tokens.css`, the only place with raw colours, fonts and
+  sizes), base styles and components; `src/app/_lib/` also holds the shell, display components,
+  charts, formatting and the help loader. `scripts/dev/` the demo-data seed
 - `src/auth/` server-only auth code (argon2id, TOTP, sessions, services); `scripts/auth/` the
   command-line owner scripts; `src/proxy.ts` first-line redirect, CSRF check, CSP and headers
 - `src/domain/` pure logic (no I/O; ESLint enforces it): `money/` (decimal.js helper), `trades/`
@@ -51,6 +54,7 @@ Dependency direction: `app -> domain, data`; `data -> domain, config`; `integrat
 - `npm run db:migrate` apply migrations to the database in `DATABASE_URL` (run once after cloning
   and after pulling new migrations)
 - `npm run db:generate` create a new migration after changing `src/data/schema.ts` (commit it)
+- `npm run dev:seed` fill a separate DEMO database (refuses the real journal; see the README)
 - `npm run auth:generate-secret` print a random `AUTH_SECRET`; `npm run auth:create-owner` create the
   one owner (real terminal only); `npm run auth:reset` reset password and authenticator
 
@@ -134,8 +138,26 @@ Five review agents live in `.claude/agents/` (details, license and attribution i
     `auth_events` is append-only. Rate-limit state lives in SQLite and rejected attempts are not
     counted.
   - Cookies: HttpOnly, SameSite=Strict, `__Host-` + Secure over HTTPS. CSRF: Origin must match Host.
-    CSP has no `unsafe-inline`: no inline `style=` attributes or inline scripts (use `globals.css`).
+    CSP has no `unsafe-inline`: no inline `style=` attributes or inline scripts (use the stylesheets in `src/app/styles/`).
   - Vet and discuss new dependencies first (rule 8); do not add one silently.
+- UI rules (module 5):
+  - **The UI never calculates** money, risk, R or statistics (rule 3): it displays what `src/domain`
+    and `src/data` return. A missing figure becomes a tested engine function (like `computeRiskUsage`
+    and `computeRDistribution`), never page arithmetic. Formatting uses `_lib/format.ts` (sign,
+    separators, words only) and the stats `displayMoney`.
+  - **No advice or judging wording** in the UI or the docs the help texts come from ("good", "bad",
+    "should"): a test checks the help texts. Profit and loss are a neutral colour pair PLUS a sign
+    PLUS a word; colour is never the only signal.
+  - **Styling only through tokens:** new colours, fonts, sizes go in `styles/tokens.css` for both
+    themes; components use `var(--...)`. No `style` attribute, no inline script, no web font, no
+    external image, script or link, no chart library (rule 8): charts are inline SVG. Tests enforce it.
+  - **Help texts come from the docs:** add a key in `_lib/help.ts` pointing at a heading in
+    `docs/stats-glossary.md` or `docs/risk-rules.md`; never write help text in a component. Renaming a
+    doc heading breaks the test on purpose.
+  - Every page keeps PAPER and any halt visible in the header (the shell does it); the LOCALHOST ONLY
+    banner stays until module 8. Do not put block elements (`div`, `details`) inside `<p>`.
+  - The demo seed (`npm run dev:seed`) may only run on a file whose name contains "demo" and never on
+    the real journal; its guard is tested. Demo data and screenshots are never committed.
 - Hand-written SQL in migrations is not tracked by drizzle-kit: the triggers protecting
   `initial_stop_loss` (`0001`), `closed_recorded_at` and the append-only `risk_events` /
   `risk_verdicts` (`0002`), and the auth triggers (`0003`: single owner, append-only `auth_events`,

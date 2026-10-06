@@ -162,9 +162,9 @@ export function UsageMeter({
   return (
     <div className="usage">
       <div className="usage-head">
-        <span className="usage-name">
+        <div className="usage-name">
           {name} {help ? <Help id={help} /> : null}
-        </span>
+        </div>
         <span>
           {unknown ? (
             <span className="na">cannot be verified</span>
@@ -208,9 +208,9 @@ export function CountMeter({
   return (
     <div className="usage">
       <div className="usage-head">
-        <span className="usage-name">
+        <div className="usage-name">
           {name} {help ? <Help id={help} /> : null}
-        </span>
+        </div>
         <span>
           {usage.used} of {usage.limit ?? '?'}
         </span>

@@ -15,10 +15,10 @@ export default guardedPage(async (ctx) => {
     <main>
       <div className="page-head">
         <h1>New paper trade</h1>
-        <p className="lead">
+        <div className="lead">
           Log a plan before you take it. The risk engine checks it live as you type and has the
           final say. <Help id="overrides" label="What is an override?" />
-        </p>
+        </div>
       </div>
       {accounts.length === 0 ? (
         <div className="empty">

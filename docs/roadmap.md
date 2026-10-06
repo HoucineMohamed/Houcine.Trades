@@ -40,7 +40,22 @@ Modules are built in this order, each on its own branch with tests and small com
    language in `docs/security.md`. _Done when_: every route and API is protected (it is, and a test
    proves it). Carried forward: the app still binds to 127.0.0.1 and hosting needs module 8
    (HTTPS, `TRUST_PROXY`, backups of the database and of `AUTH_SECRET`).
-5. **Dashboard UI**: journal and stats views. _Done when_: owner can use it daily locally.
+5. **Dashboard UI** - **DONE**: the "Ledger" design (calm, editorial, warm paper and ink; light and
+   dark themes from CSS variables in one tokens file, system fonts only), an app shell that shows
+   PAPER and any halt on every page, a dashboard (equity, today, open trades with their risk, risk
+   limits in use, results per currency with a small equity curve, last closed trades, a guided empty
+   state), a journal with filters, sorting and pagination, a trade detail page (timeline, planned
+   versus actual, result, risk verdict snapshots, override flag, notes), polished create, open,
+   close, cancel and edit flows with the live verdict and a position-size helper, the stats page
+   with an equity-and-drawdown chart and an R distribution, the risk page with usage bars and the
+   24-hour countdown, "What does this mean?" help read from the docs (single source), and
+   `npm run dev:seed` for a separate DEMO database. New engine outputs, with tests: risk usage figures
+   and the R distribution. _Done when_: the owner can use the journal, stats and risk pages daily
+   without reading code (it can; see the browser checks in the module report). Carried forward: no
+   live prices, so open trades show their risk at the stop but no unrealised result; the size helper
+   uses the per-trade limit only (the Risk page calculator takes any risk %); no favicon or logo
+   (text wordmark only, and the proxy must not serve public files); the demo override example is a
+   directly inserted demo record (the real override path needs a fresh code).
 6. **Claude analyst and TradingView MCP**: AI analysis; the AI never does the math. Vet the MCP
    server first (rule 8).
 7. **Notifications**: alerts for risk limits and events.

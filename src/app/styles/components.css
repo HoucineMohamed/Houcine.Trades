@@ -38,11 +38,15 @@
 }
 .account-switch {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  max-width: 100%;
 }
 .account-switch select {
   min-height: 2.25rem;
+  min-width: 0;
+  max-width: 100%;
 }
 .account-switch button,
 .theme-toggle button {
@@ -51,6 +55,7 @@
 }
 .theme-toggle {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
   align-items: center;
 }
@@ -107,8 +112,9 @@
   padding: var(--space-3) 0;
   color: var(--ink-2);
   text-decoration: none;
-  border-bottom: var(--focus-width) solid transparent;
   background: none;
+  border: 0;
+  border-bottom: var(--focus-width) solid transparent;
   border-radius: 0;
   min-height: 0;
   font-weight: 500;
@@ -283,6 +289,7 @@ main.narrow {
   text-transform: uppercase;
   margin-left: var(--space-1);
   color: inherit;
+  white-space: nowrap;
 }
 .na {
   color: var(--ink-3);
@@ -640,7 +647,7 @@ details.data-table > summary {
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
 }
 .grid-tight {
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
 }
 .halt-box {
   border: var(--focus-width) solid var(--alert);

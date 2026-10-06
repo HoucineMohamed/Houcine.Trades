@@ -129,6 +129,13 @@ async function render(entry: (typeof PAGES)[number]): Promise<string> {
 export function unsafeThings(html: string): string[] {
   const found: string[] = [];
   if (/\sstyle\s*=/i.test(html)) found.push('an inline style attribute');
+  // a <p> cannot contain blocks: the browser would close it early and hydration would fail
+  if (
+    /<p[\s>](?:(?!<\/p>)[\s\S])*?<(details|div|ul|ol|table|section|figure|form|h[1-6])[\s>]/i.test(
+      html,
+    )
+  )
+    found.push('a block element inside a <p>');
   if (/<style[\s>]/i.test(html)) found.push('a <style> element');
   if (/<script[\s>]/i.test(html)) found.push('a <script> element');
   if (/\son[a-z]+\s*=/i.test(html)) found.push('an inline event handler');
@@ -382,6 +389,8 @@ describe('the unsafe-thing detector itself catches problems', () => {
     ['<a href="javascript:alert(1)">x</a>', 'javascript'],
     ['<button onclick="x()">x</button>', 'event handler'],
     ['<link rel="stylesheet" href="/a.css">', '<link>'],
+    ['<p>text <details><summary>x</summary></details></p>', 'block in p'],
+    ['<p>text <div>x</div></p>', 'div in p'],
   ])('flags %s', (html) => {
     expect(unsafeThings(html)).not.toEqual([]);
   });

@@ -56,9 +56,9 @@ export default guardedPage(async (ctx) => {
               </p>
             ))}
             {o.sampleSize.warning && (
-              <p className="notice notice-note" role="status">
+              <div className="notice notice-note" role="status">
                 <strong>Small sample.</strong> {o.sampleSize.warning} <Help id="sampleSize" />
-              </p>
+              </div>
             )}
             {o.flags.tradesWithExcludedFees > 0 && (
               <p className="notice notice-note" role="status">
@@ -120,10 +120,10 @@ export default guardedPage(async (ctx) => {
                   id={`eq-${c.quoteCurrency}`}
                 />
                 {!c.isBaseCurrency && (
-                  <p className="small">
+                  <div className="small">
                     This currency has no starting balance, so its curve starts at 0.{' '}
                     <Help id="baseCurrency" />
-                  </p>
+                  </div>
                 )}
               </div>
               <div className="panel">

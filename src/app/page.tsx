@@ -256,10 +256,10 @@ export default guardedPage(async (ctx) => {
                 <p className="small">{c.overall.sampleSize.warning}</p>
               )}
               {!c.isBaseCurrency && (
-                <p className="small">
+                <div className="small">
                   Equity exists only in the base currency ({base}), so there is no equity or
                   drawdown percentage for {c.quoteCurrency}. <Help id="baseCurrency" />
-                </p>
+                </div>
               )}
             </div>
           ))}

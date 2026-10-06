@@ -29,12 +29,12 @@ export default guardedPage(
           </p>
         )}
 
-        <p className="notice notice-note" role="note">
+        <div className="notice notice-note" role="note">
           <strong>Set the base currency to the currency you actually trade in</strong> (for example
           USDT if you trade BTCUSDT, USD if you trade EURUSD). The starting balance and the drawdown
           percentage only work for trades quoted in this currency, because currencies are never
           converted. <Help id="baseCurrency" />
-        </p>
+        </div>
 
         <section aria-labelledby="new-account">
           <div className="section-head">

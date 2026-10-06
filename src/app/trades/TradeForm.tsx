@@ -54,9 +54,14 @@ export function TradeForm({
         .finally(() => setChecking(false));
     }
     if (sizeHelper) {
-      sizeHelper(values)
-        .then(setSuggestion)
-        .catch(() => setSuggestion(null));
+      // Nothing to suggest until an entry price is typed (no list of "missing" messages up front).
+      const entry = values.status === 'open' ? values.entryPrice : values.plannedEntry;
+      if (!entry || entry.trim() === '') setSuggestion(null);
+      else {
+        sizeHelper(values)
+          .then(setSuggestion)
+          .catch(() => setSuggestion(null));
+      }
     }
   };
   const scheduleRefresh = () => {
@@ -239,7 +244,10 @@ export function TradeForm({
             <div className="notice notice-note" aria-live="polite">
               <strong>Position-size helper</strong>
               {suggestion === null ? (
-                <p className="small">Enter the account, entry and stop-loss to see a size.</p>
+                <p className="small">
+                  Type the entry price and the stop-loss to see the largest size inside your
+                  per-trade limit.
+                </p>
               ) : suggestion.ok ? (
                 <>
                   <p>
