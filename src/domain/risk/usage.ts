@@ -35,6 +35,8 @@ export interface UsageLine {
 export interface CountUsage {
   used: number;
   limit: number | null;
+  /** used as a percent of the limit (2 decimals, rounded up), or null when there is no limit. */
+  shareOfLimit: string | null;
   reached: boolean | null;
 }
 
@@ -114,6 +116,10 @@ export function computeRiskUsage(ctx: RiskContext): RiskUsage {
   const openTrades: CountUsage = {
     used: ctx.openTrades.length,
     limit,
+    shareOfLimit:
+      limit === null || limit <= 0
+        ? null
+        : up2(new Dec(ctx.openTrades.length).times(100).div(limit)),
     reached: limit === null ? null : ctx.openTrades.length >= limit,
   };
 

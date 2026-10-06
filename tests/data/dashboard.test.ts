@@ -36,7 +36,7 @@ describe('loadDashboard', () => {
     expect(d.risk.equity).toBe('10000');
     expect(d.usage.openRisk).toMatchObject({ used: '0', problem: null });
     expect(d.usage.dailyLoss).toMatchObject({ used: '0', limitAmount: '300' });
-    expect(d.usage.openTrades).toEqual({ used: 0, limit: 3, reached: false });
+    expect(d.usage.openTrades).toEqual({ used: 0, limit: 3, shareOfLimit: '0.00', reached: false });
   });
 
   it('shows the engines’ own numbers: equity, today, open risk, last closed trades newest first', () => {

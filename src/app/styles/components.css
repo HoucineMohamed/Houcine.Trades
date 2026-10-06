@@ -606,3 +606,46 @@ main.narrow {
     margin-left: 0;
   }
 }
+
+/* ---- additions: charts and small elements ---------------------------------------------------- */
+.chart-dot {
+  fill: var(--surface);
+  stroke: var(--chart-line);
+  stroke-width: 2;
+}
+.chart-count {
+  fill: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-anchor: middle;
+}
+details.data-table {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+details.data-table > summary {
+  color: var(--accent);
+}
+.row-link {
+  white-space: nowrap;
+}
+.currency-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.meter-grid {
+  display: grid;
+  gap: var(--space-2) var(--space-5);
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
+.halt-box {
+  border: var(--focus-width) solid var(--alert);
+  background: var(--alert-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.halt-box p {
+  margin-bottom: var(--space-2);
+}

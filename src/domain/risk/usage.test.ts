@@ -113,21 +113,26 @@ describe('open risk usage', () => {
 describe('open trades usage', () => {
   it('counts and compares with the limit', () => {
     const three = [1, 2, 3].map((tradeId) => openTrade({ tradeId }));
+    // 2 of 3 = 66.666... % -> rounded UP to 66.67 (never understated)
     expect(computeRiskUsage(ctx({ openTrades: three.slice(0, 2) })).openTrades).toEqual({
       used: 2,
       limit: 3,
+      shareOfLimit: '66.67',
       reached: false,
     });
     expect(computeRiskUsage(ctx({ openTrades: three })).openTrades).toEqual({
       used: 3,
       limit: 3,
+      shareOfLimit: '100.00',
       reached: true,
     });
+    expect(computeRiskUsage(ctx()).openTrades.shareOfLimit).toBe('0.00');
   });
   it('has an unknown limit when the settings are invalid', () => {
     expect(computeRiskUsage(ctx({ settings: null, settingsProblem: 'bad' })).openTrades).toEqual({
       used: 0,
       limit: null,
+      shareOfLimit: null,
       reached: null,
     });
   });
