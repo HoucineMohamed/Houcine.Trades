@@ -25,7 +25,7 @@ export function guardedPage<P = object>(
     } catch (error) {
       return databaseProblem(error);
     }
-    return <Shell>{await fn(ctx, props)}</Shell>;
+    return <Shell ctx={ctx}>{await fn(ctx, props)}</Shell>;
   };
 }
 
