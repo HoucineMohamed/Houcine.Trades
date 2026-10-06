@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { EquityCurve, RDistribution } from '@/domain/stats';
 import { equityGeometry, histogramGeometry, makeFrame } from './chart';
-import { formatAmount, formatUtc } from './format';
+import { formatMoney, formatUtc } from './format';
 
 /**
  * Hand-drawn SVG charts: classes and presentation attributes only (the Content-Security-Policy
@@ -22,16 +22,16 @@ export function EquityChart({
   compact?: boolean;
   id: string;
 }) {
-  const width = 640;
-  const height = compact ? 150 : 240;
+  const width = compact ? 520 : 640;
+  const height = compact ? 170 : 240;
   const frame = makeFrame(width, height, { left: 76, right: 16, top: 14, bottom: 26 });
   const g = equityGeometry(curve, frame);
   const first = curve.points[0];
   const last = curve.points[curve.points.length - 1];
   const title = `Equity curve in ${currency}`;
   const desc = curve.points.length
-    ? `Equity after each of ${curve.points.length} closed trades, from ${formatAmount(curve.startingEquity)} to ${formatAmount(curve.endingEquity)} ${currency}. Highest point ${formatAmount(g.highLabel)}, lowest ${formatAmount(g.lowLabel)}.`
-    : `No closed trades yet. Equity is ${formatAmount(curve.startingEquity)} ${currency}.`;
+    ? `Equity after each of ${curve.points.length} closed trades, from ${formatMoney(curve.startingEquity)} to ${formatMoney(curve.endingEquity)} ${currency}. Highest point ${formatMoney(g.highLabel)}, lowest ${formatMoney(g.lowLabel)}.`
+    : `No closed trades yet. Equity is ${formatMoney(curve.startingEquity)} ${currency}.`;
   return (
     <figure className="chart-figure" aria-labelledby={`${id}-t`}>
       <svg
@@ -58,10 +58,10 @@ export function EquityChart({
         />
         <line className="chart-zero" x1={frame.left} x2={frame.right} y1={g.startY} y2={g.startY} />
         <text className="chart-text" x={frame.left - 8} y={frame.top + 4} textAnchor="end">
-          {formatAmount(g.highLabel)}
+          {formatMoney(g.highLabel)}
         </text>
         <text className="chart-text" x={frame.left - 8} y={frame.bottom} textAnchor="end">
-          {formatAmount(g.lowLabel)}
+          {formatMoney(g.lowLabel)}
         </text>
         {g.hasDrawdown && <path className="chart-dd" d={g.drawdown} />}
         <path className="chart-line" d={g.line} />
@@ -108,8 +108,8 @@ export function EquityChart({
                     <td>
                       <Link href={`/trades/${p.tradeId}`}>#{p.tradeId}</Link>
                     </td>
-                    <td className="num">{formatAmount(p.equity)}</td>
-                    <td className="num">{formatAmount(p.fallFromPeak)}</td>
+                    <td className="num">{formatMoney(p.equity)}</td>
+                    <td className="num">{formatMoney(p.fallFromPeak)}</td>
                   </tr>
                 ))}
               </tbody>

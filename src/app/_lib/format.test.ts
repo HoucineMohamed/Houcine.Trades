@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   formatAmount,
   formatCountdown,
+  formatMoney,
+  formatMoneySigned,
   formatPercent,
   formatR,
   formatSigned,
@@ -125,5 +127,37 @@ describe('safeHttpUrl: links only for http and https', () => {
   it('refuses null and undefined', () => {
     expect(safeHttpUrl(null)).toBeNull();
     expect(safeHttpUrl(undefined)).toBeNull();
+  });
+});
+
+describe('formatMoney and formatMoneySigned', () => {
+  it('two decimals from 1 upward, grouped, padded', () => {
+    expect(formatMoney('11403.301211')).toBe('11,403.30');
+    expect(formatMoney('10000')).toBe('10,000.00');
+    expect(formatMoney('1403.3')).toBe('1,403.30');
+    expect(formatMoney('-1234.5678')).toBe('-1,234.57');
+    expect(formatMoney('1')).toBe('1.00');
+  });
+  it('below 1 keeps up to eight decimals so a tiny amount never looks like zero', () => {
+    expect(formatMoney('0.5')).toBe('0.5');
+    expect(formatMoney('0.00000123')).toBe('0.00000123');
+    expect(formatMoney('0')).toBe('0');
+    expect(formatMoney('0.999999999')).toBe('1');
+  });
+  it('rounds half-even like the rest of the app', () => {
+    expect(formatMoney('2.125')).toBe('2.12');
+    expect(formatMoney('2.135')).toBe('2.14');
+  });
+  it('signed: sign, word and money precision', () => {
+    expect(formatMoneySigned('1403.301211')).toEqual({
+      text: '+1,403.30',
+      kind: 'profit',
+      word: 'profit',
+    });
+    expect(formatMoneySigned('-38.462661')).toEqual({ text: '−38.46', kind: 'loss', word: 'loss' });
+    expect(formatMoneySigned('0')).toMatchObject({ text: '0', kind: 'flat' });
+    expect(formatMoneySigned('0.000000004')).toMatchObject({ text: '0', kind: 'flat' });
+    expect(formatMoneySigned('-0.00000002')).toMatchObject({ text: '−0.00000002', kind: 'loss' });
+    expect(formatMoneySigned('oops')).toMatchObject({ text: 'oops', kind: 'flat' });
   });
 });

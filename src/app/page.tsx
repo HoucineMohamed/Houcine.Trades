@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { loadDashboard } from '@/data/dashboard';
-import { formatAmount, formatUtc } from './_lib/format';
+import { formatAmount, formatMoney, formatUtc } from './_lib/format';
 import { selectedAccount } from './_lib/account';
 import { EquityChart } from './_lib/charts';
 import { guardedPage } from './_lib/guard';
@@ -104,7 +104,7 @@ export default guardedPage(async (ctx) => {
               {risk.equity === null ? (
                 <span className="na">cannot be verified</span>
               ) : (
-                formatAmount(risk.equity)
+                formatMoney(risk.equity)
               )}
             </MetricTile>
           </div>
@@ -207,7 +207,7 @@ export default guardedPage(async (ctx) => {
                         </span>
                       ) : (
                         <>
-                          {formatAmount(t.risk.amount)} {base}
+                          {formatMoney(t.risk.amount)} {base}
                         </>
                       )}
                     </td>
@@ -232,7 +232,7 @@ export default guardedPage(async (ctx) => {
                 <h3>{c.quoteCurrency}</h3>
                 {c.isBaseCurrency && <span className="tag">base currency</span>}
               </div>
-              <div className="grid">
+              <div className="grid grid-tight">
                 <MetricTile label="Net result" help="netPnl" small>
                   <MetricSigned
                     metric={{ value: c.overall.netPnl, reason: null }}

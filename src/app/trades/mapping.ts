@@ -58,6 +58,8 @@ export const closeInputFromForm = (v: FormValues) => ({
   exitPrice: orUndefined(v.exitPrice),
   closedAt: localToUtc(v.closedAt),
   fees: orUndefined(v.fees),
+  reviewNotes: orUndefined(v.reviewNotes),
+  emotion: orUndefined(v.emotion),
 });
 
 /**

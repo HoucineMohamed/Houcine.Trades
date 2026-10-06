@@ -12,7 +12,7 @@ import { guardedAction, optionalFreshAuth, requireFreshAuth } from '../_lib/guar
 import { errorMessages, formValues, toId } from '../_lib/form';
 
 const back = (accountId: number | undefined, kind: 'ok' | 'error', message: string) =>
-  `/risk?account=${accountId ?? ''}&${kind}=${encodeURIComponent(message)}`;
+  `/risk?${kind}=${encodeURIComponent(message)}`;
 
 function describe(result: SettingsChangeResult): string {
   const parts: string[] = [];

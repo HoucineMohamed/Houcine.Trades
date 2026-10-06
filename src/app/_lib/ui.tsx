@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { Metric } from '@/domain/stats';
 import type { CountUsage, UsageLine } from '@/domain/risk';
 import { usageBar } from './chart';
-import { formatAmount, formatPercent, formatR, formatSigned, type SignedText } from './format';
+import { formatMoney, formatMoneySigned, formatPercent, formatR, type SignedText } from './format';
 import { Help } from './Help';
 import type { HelpKey } from './help';
 
@@ -24,18 +24,10 @@ function SignedSpan({ s }: { s: SignedText }) {
 }
 
 /** A result (net P&L, today's result) with sign, separators and a neutral word. */
-export function Signed({
-  value,
-  currency,
-  places,
-}: {
-  value: string;
-  currency?: string;
-  places?: number;
-}) {
+export function Signed({ value, currency }: { value: string; currency?: string }) {
   return (
     <>
-      <SignedSpan s={formatSigned(value, places)} />
+      <SignedSpan s={formatMoneySigned(value)} />
       {currency ? <> {currency}</> : null}
     </>
   );
@@ -56,7 +48,7 @@ export function MetricAmount({ metric, currency }: { metric: Metric; currency?: 
     <NotAvailable reason={metric.reason} />
   ) : (
     <>
-      {formatAmount(metric.value)}
+      {formatMoney(metric.value)}
       {currency ? <> {currency}</> : null}
     </>
   );
@@ -106,12 +98,10 @@ export function MetricTile({
 }) {
   return (
     <div className="metric">
-      <div className="metric-label">
-        <span>{label}</span>
-        {help ? <Help id={help} /> : null}
-      </div>
+      <div className="metric-label">{label}</div>
       <div className={small ? 'metric-value sm' : 'metric-value'}>{children}</div>
       {sub ? <div className="metric-sub">{sub}</div> : null}
+      {help ? <Help id={help} /> : null}
     </div>
   );
 }
@@ -180,7 +170,7 @@ export function UsageMeter({
             <span className="na">cannot be verified</span>
           ) : (
             <>
-              {formatAmount(line.used as string)} of {formatAmount(line.limitAmount as string)}
+              {formatMoney(line.used as string)} of {formatMoney(line.limitAmount as string)}
               {currency ? ` ${currency}` : ''}
             </>
           )}

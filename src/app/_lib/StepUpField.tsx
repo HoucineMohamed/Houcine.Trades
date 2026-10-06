@@ -6,7 +6,7 @@ export function StepUpField({ fresh }: { fresh: boolean }) {
   if (fresh) {
     return (
       <p role="status">
-        <small>🔓 A fresh code was accepted in the last 5 minutes. No code needed right now.</small>
+        <small>A fresh code was accepted in the last 5 minutes. No code needed right now.</small>
       </p>
     );
   }

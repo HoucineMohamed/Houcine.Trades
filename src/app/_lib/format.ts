@@ -26,6 +26,18 @@ export function formatAmount(value: string, places = 8): string {
   return isDecimalString(value) ? groupThousands(displayMoney(value, places)) : value;
 }
 
+/**
+ * A money amount for people: two decimals for amounts of 1 or more ("11,403.30"), up to eight
+ * trimmed decimals below 1 so a tiny non-zero amount never looks like zero. Display only.
+ */
+export function formatMoney(value: string): string {
+  if (!isDecimalString(value)) return value;
+  const abs = value.replace(/^-/, '');
+  if (new Dec(abs).lt(1)) return formatAmount(value, 8);
+  const [whole, fraction = ''] = groupThousands(displayMoney(value, 2)).split('.');
+  return `${whole}.${fraction.padEnd(2, '0')}`;
+}
+
 export type ResultKind = 'profit' | 'loss' | 'flat';
 
 /** Which way a result points: a classification for the sign and the label, not a calculation. */
@@ -52,6 +64,15 @@ export function formatSigned(value: string, places = 8): SignedText {
   const kind = resultKind(shown);
   const grouped = groupThousands(shown.replace(/^-/, ''));
   const text = kind === 'profit' ? `+${grouped}` : kind === 'loss' ? `${MINUS}${grouped}` : '0';
+  return { text, kind, word: WORD[kind] };
+}
+
+/** Like formatSigned, with the money precision of formatMoney. */
+export function formatMoneySigned(value: string): SignedText {
+  if (!isDecimalString(value)) return { text: value, kind: 'flat', word: 'break-even' };
+  const kind = resultKind(displayMoney(value, 8));
+  const body = formatMoney(value.replace(/^-/, ''));
+  const text = kind === 'profit' ? `+${body}` : kind === 'loss' ? `${MINUS}${body}` : '0';
   return { text, kind, word: WORD[kind] };
 }
 

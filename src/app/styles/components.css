@@ -393,7 +393,7 @@ main.narrow {
 .chart-text {
   fill: var(--ink-2);
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 13px;
 }
 .chart-bar {
   fill: var(--accent);
@@ -616,7 +616,7 @@ main.narrow {
 .chart-count {
   fill: var(--ink);
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 13px;
   text-anchor: middle;
 }
 details.data-table {
@@ -639,6 +639,9 @@ details.data-table > summary {
   gap: var(--space-2) var(--space-5);
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
 }
+.grid-tight {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
 .halt-box {
   border: var(--focus-width) solid var(--alert);
   background: var(--alert-soft);
@@ -648,4 +651,40 @@ details.data-table > summary {
 }
 .halt-box p {
   margin-bottom: var(--space-2);
+}
+
+.notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.stack > * + * {
+  margin-top: var(--space-3);
+}
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+.verdict {
+  border-top: var(--rule-width) solid var(--rule);
+  padding-top: var(--space-3);
+  margin-top: var(--space-3);
+}
+.verdict:first-child {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+.contents {
+  display: contents;
+}
+
+td.num,
+th.num {
+  white-space: nowrap;
+}
+.metric > .help {
+  margin-top: var(--space-1);
 }

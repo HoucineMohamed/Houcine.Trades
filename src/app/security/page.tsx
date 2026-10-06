@@ -27,11 +27,17 @@ export default guardedPage(
     const fresh = ctx.auth !== null;
     return (
       <main>
-        <h1>Security</h1>
+        <div className="page-head">
+          <h1>Security</h1>
+          <p className="lead">
+            Who can use this workspace, and what happened recently. Sensitive actions ask for a
+            fresh authenticator code.
+          </p>
+        </div>
         {sp.recovery === 'used' && (
-          <p role="alert">
-            ⚠️ You signed in with a recovery code. Every other session was ended. Generate a new set
-            of recovery codes below.
+          <p role="alert" className="notice notice-alert">
+            You signed in with a recovery code. Every other session was ended. Generate a new set of
+            recovery codes below.
           </p>
         )}
         <p>
@@ -51,34 +57,36 @@ export default guardedPage(
         />
 
         <h2>Sessions</h2>
-        <table border={1} cellPadding={6}>
-          <thead>
-            <tr>
-              <th>Started</th>
-              <th>Last seen</th>
-              <th>From</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {overview.sessions.map((s) => (
-              <tr key={s.id}>
-                <td>{formatLocal(s.createdAt)}</td>
-                <td>{formatLocal(s.lastSeenAt)}</td>
-                <td>
-                  {s.ip} <small>{s.userAgent.slice(0, 60)}</small>
-                </td>
-                <td>
-                  {s.id === ctx.session.id
-                    ? 'this session'
-                    : s.revokedAt
-                      ? `ended (${s.revokedReason ?? ''})`
-                      : 'active'}
-                </td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Started</th>
+                <th>Last seen</th>
+                <th>From</th>
+                <th>Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {overview.sessions.map((s) => (
+                <tr key={s.id}>
+                  <td>{formatLocal(s.createdAt)}</td>
+                  <td>{formatLocal(s.lastSeenAt)}</td>
+                  <td>
+                    {s.ip} <small>{s.userAgent.slice(0, 60)}</small>
+                  </td>
+                  <td>
+                    {s.id === ctx.session.id
+                      ? 'this session'
+                      : s.revokedAt
+                        ? `ended (${s.revokedReason ?? ''})`
+                        : 'active'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <h3>Log out everywhere</h3>
         <CodeActionForm
           action={logoutEverywhereAction}
@@ -87,26 +95,28 @@ export default guardedPage(
         />
 
         <h2>Recent security events</h2>
-        <table border={1} cellPadding={6}>
-          <thead>
-            <tr>
-              <th>When (local)</th>
-              <th>What</th>
-              <th>From</th>
-              <th>Note</th>
-            </tr>
-          </thead>
-          <tbody>
-            {overview.events.map((e) => (
-              <tr key={e.id}>
-                <td>{formatLocal(e.createdAt)}</td>
-                <td>{EVENT_LABELS[e.kind] ?? e.kind}</td>
-                <td>{e.ip}</td>
-                <td>{e.detail}</td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>When (local)</th>
+                <th>What</th>
+                <th>From</th>
+                <th>Note</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {overview.events.map((e) => (
+                <tr key={e.id}>
+                  <td>{formatLocal(e.createdAt)}</td>
+                  <td>{EVENT_LABELS[e.kind] ?? e.kind}</td>
+                  <td>{e.ip}</td>
+                  <td>{e.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </main>
     );
   },
