@@ -56,7 +56,11 @@ async function run(
     );
   } catch {
     // Any unexpected problem is shown as one plain sentence; details never reach the page.
-    return { ok: false, message: 'The analyst could not run just now. Nothing was sent.' };
+    return {
+      ok: false,
+      message:
+        'The analyst stopped unexpectedly. Look at "Recent requests" on the Analyst page to see whether anything was sent.',
+    };
   }
 }
 
@@ -142,20 +146,32 @@ export const updateCapsAction = guardedAction(async (ctx, formData: FormData) =>
 /** "Ask the analyst" on the new-trade form. The verdict is recomputed here by the real engine. */
 export const askPlanReviewAction = guardedAction(
   async (ctx, values: FormValues): Promise<AnalystActionResult> => {
-    const { accountId, plan } = planFromForm(values);
-    const loaded = loadPlanReviewFacts(
-      ctx.db,
-      {
-        accountId,
-        plan,
-        setupId: toId(values.setupId) ?? null,
-        planNotes: values.planNotes ?? '',
-        emotion: values.emotion ?? '',
-      },
-      new Date(),
-    );
-    if (!loaded.ok) return { ok: false, message: loaded.message };
-    const built = buildPlanReviewPrompt(loaded.facts);
+    let accountId: number;
+    let plan: ReturnType<typeof planFromForm>['plan'];
+    let built: BuiltPrompt;
+    try {
+      ({ accountId, plan } = planFromForm(values));
+      const loaded = loadPlanReviewFacts(
+        ctx.db,
+        {
+          accountId,
+          plan,
+          setupId: toId(values.setupId) ?? null,
+          planNotes: values.planNotes ?? '',
+          emotion: values.emotion ?? '',
+        },
+        new Date(),
+      );
+      if (!loaded.ok) return { ok: false, message: loaded.message };
+      built = buildPlanReviewPrompt(loaded.facts);
+    } catch (error) {
+      // a half-filled form: say which field, never crash the form
+      try {
+        return { ok: false, message: errorMessages(error).join(' | ') };
+      } catch {
+        return { ok: false, message: 'The analyst could not read this plan. Nothing was sent.' };
+      }
+    }
     const subject = scrubSensitive(
       `${plan.symbol} ${plan.direction} entry ${plan.entry ?? '?'} stop ${plan.stop ?? '?'} size ${plan.size ?? '?'}`,
     ).slice(0, 200);

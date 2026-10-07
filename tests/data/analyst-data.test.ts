@@ -274,3 +274,64 @@ describe('stored reviews', () => {
     expect(getReview(db, id)?.checks).toBeNull();
   });
 });
+
+describe('a loosening that matured is never lost by a later save', () => {
+  const AFTER = at('2026-03-11T12:00:01.000Z'); // 24 hours and 1 second later
+
+  it('saving another cap keeps the matured value and does not restart its timer or ask for a code', () => {
+    const db = dbWithSession();
+    updateAiCaps(db, { dailyCalls: 50 }, fresh(), NOW);
+    // the owner now edits only the monthly cap (the form is prefilled with the effective 50)
+    const r = updateAiCaps(db, { dailyCalls: 50, monthlyCalls: 100 }, null, AFTER);
+    expect(r.deferred).toEqual([]);
+    const v = getAiSettings(db, AFTER);
+    expect(v.effective).toEqual({ dailyCalls: 50, monthlyCalls: 100, monthlyCostUsd: '5' });
+    expect(v.pending).toEqual({});
+  });
+
+  it('toggling the privacy switch keeps it too', () => {
+    const db = dbWithSession();
+    updateAiCaps(db, { dailyCalls: 50 }, fresh(), NOW);
+    setAiConsent(db, true, fresh(AFTER), AFTER);
+    expect(getAiSettings(db, AFTER).effective?.dailyCalls).toBe(50);
+    setAiConsent(db, false, null, AFTER);
+    expect(getAiSettings(db, AFTER).effective?.dailyCalls).toBe(50);
+  });
+
+  it('a still-waiting change stays waiting after a consent toggle', () => {
+    const db = dbWithSession();
+    updateAiCaps(db, { dailyCalls: 50 }, fresh(), NOW);
+    setAiConsent(db, true, fresh(), NOW);
+    expect(getAiSettings(db, NOW).pending.dailyCalls?.value).toBe(50);
+  });
+});
+
+describe('corrupt settings are never silently rewritten', () => {
+  function corrupt() {
+    const db = dbWithSession();
+    db.$client
+      .prepare(
+        "INSERT INTO ai_settings (id, consent, caps_json, updated_at) VALUES (1, 1, '{\"dailyCalls\":5}', 't')",
+      )
+      .run();
+    return db;
+  }
+  it('the switch cannot be turned ON, and the stored caps are left as they are', () => {
+    const db = corrupt();
+    expect(() => setAiConsent(db, true, fresh(), NOW)).toThrow(ValidationError);
+    const row = db.$client.prepare('SELECT caps_json FROM ai_settings').get() as {
+      caps_json: string;
+    };
+    expect(row.caps_json).toBe('{"dailyCalls":5}');
+  });
+  it('the switch can still be turned OFF (touching only the switch) and it is logged as such', () => {
+    const db = corrupt();
+    setAiConsent(db, false, null, NOW);
+    const row = db.$client.prepare('SELECT consent, caps_json FROM ai_settings').get() as {
+      consent: number;
+      caps_json: string;
+    };
+    expect(row).toEqual({ consent: 0, caps_json: '{"dailyCalls":5}' });
+    expect(listAuthEvents(db)[0]?.detail).toBe('privacy_switch_settings_corrupt');
+  });
+});

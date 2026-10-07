@@ -105,14 +105,39 @@ describe('findInstructionWording', () => {
   });
 
   it.each([
+    'Take profits now.',
+    'Buy.',
+    'Raise the limit.',
+    'You might want to take profit.',
+    'Please exit.',
+    'Reduce risk next week.',
+  ])('flags (formerly missed): %s', (sentence) => {
+    expect(findInstructionWording([sentence]).length).toBeGreaterThan(0);
+  });
+
+  it.each([
     'The risk engine refused the plan because the risk is above the limit.',
     'The stop-loss sits 5 below the entry, so the loss at the stop is 10.',
     'Expectancy is the average result per trade.',
     'The sample is small, so the figures may change a lot.',
     'What made you pick this entry?',
     'Two trades were logged by override of a refusal.',
-  ])('does not flag: %s', (sentence) => {
+    'Why did you add to the position?',
+    'What made you close the trade early?',
+    'You closed early on 3 trades.',
+    'The stop was moved on trade 4.',
+    'Exit rules were followed.',
+    'Selling pressure was high that week.',
+    'The trader moved the stop to breakeven.',
+    'Consider the risk numbers above.',
+  ])('does not flag a description or a plain question: %s', (sentence) => {
     expect(findInstructionWording([sentence])).toEqual([]);
+  });
+});
+
+describe('known limits of the wording check (documented, pinned)', () => {
+  it('a sentence that merely QUOTES an action can still be flagged (it only warns, the text stays)', () => {
+    expect(findInstructionWording(['The notes mention wanting to buy more.']).length).toBe(1);
   });
 });
 

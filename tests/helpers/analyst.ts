@@ -45,6 +45,8 @@ export const failReply = (
   ok: false,
   reason,
   detail: 'test failure',
+  // a timeout may have been billed; an api_error stands for an HTTP error answer (nothing generated)
+  billing: reason === 'api_error' ? 'none' : 'unknown',
   inputTokens: tokens?.in ?? null,
   outputTokens: tokens?.out ?? null,
 });

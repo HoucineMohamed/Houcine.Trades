@@ -286,14 +286,68 @@ describe('failures are plain, logged, and never retried', () => {
     expect(JSON.stringify(r)).not.toContain('boom');
   });
 
-  it('if the usage cannot be written, the answer is NOT shown', async () => {
+  it('if the review cannot be saved, the spend is STILL counted (and the answer is not shown)', async () => {
     const { db, runtime } = ready();
     db.$client.exec(
       "CREATE TRIGGER block_reviews BEFORE INSERT ON ai_reviews BEGIN SELECT RAISE(ABORT, 'disk full'); END",
     );
     const r = await runAnalyst(db, runtime, built(), meta, NOW);
     expect(r).toMatchObject({ ok: false, code: 'storage_error' });
-    expect(listRecentUsage(db)).toEqual([]); // the transaction rolled back as a whole
+    expect(listRecentUsage(db)).toHaveLength(1);
+    expect(getUsageTotals(db, NOW).callsToday).toBe(1);
+  });
+
+  it('if the usage cannot be written, the answer is NOT shown', async () => {
+    const { db, runtime } = ready();
+    db.$client.exec(
+      "CREATE TRIGGER block_usage BEFORE INSERT ON ai_usage BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    const r = await runAnalyst(db, runtime, built(), meta, NOW);
+    expect(r).toMatchObject({ ok: false, code: 'storage_error' });
+    expect(listReviews(db)).toEqual([]);
+  });
+
+  it('a billed reply that cannot be read counts the worst case, but an HTTP error counts nothing', async () => {
+    const unknown = ready({
+      ok: false,
+      reason: 'api_error',
+      detail: 'x',
+      billing: 'unknown',
+      inputTokens: null,
+      outputTokens: null,
+    });
+    await runAnalyst(unknown.db, unknown.runtime, built(), meta, NOW);
+    expect(Number(listRecentUsage(unknown.db)[0]?.estimatedCostUsd)).toBeGreaterThan(0.03);
+    const http = ready(failReply('api_error'));
+    await runAnalyst(http.db, http.runtime, built(), meta, NOW);
+    expect(listRecentUsage(http.db)[0]?.estimatedCostUsd).toBe('0.000000');
+  });
+
+  it('two identical requests at the same moment send ONE request (the second reads the stored answer)', async () => {
+    const { db, runtime, client } = ready();
+    const [a, b] = await Promise.all([
+      runAnalyst(db, runtime, built('same?'), meta, NOW),
+      runAnalyst(db, runtime, built('same?'), meta, NOW),
+    ]);
+    expect(client.requests).toHaveLength(1);
+    expect([a, b].filter((r) => r.ok && r.fromStore)).toHaveLength(1);
+  });
+
+  it('skips an unreadable stored answer and uses the newest readable one', async () => {
+    const { db, runtime, client } = ready();
+    const b = built('again?');
+    await runAnalyst(db, runtime, b, meta, NOW);
+    // an OLDER row with the same hash whose output no longer validates
+    db.$client.exec('DROP TRIGGER ai_reviews_no_update');
+    db.$client.prepare('UPDATE ai_reviews SET id = 50').run();
+    db.$client
+      .prepare(
+        "INSERT INTO ai_reviews (id, kind, input_hash, output_json, checks_json, usage_id, model, created_at) SELECT 5, kind, input_hash, '{}', checks_json, usage_id, model, created_at FROM ai_reviews",
+      )
+      .run();
+    const r = await runAnalyst(db, runtime, b, meta, NOW);
+    expect(r).toMatchObject({ ok: true, fromStore: true, reviewId: 50 });
+    expect(client.requests).toHaveLength(1);
   });
 
   it('if the stored answers cannot be read, nothing is sent', async () => {

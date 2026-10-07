@@ -27,9 +27,7 @@ export function envIsGitIgnored(envPath: string): boolean {
     .readFileSync(ignorePath, 'utf8')
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .some(
-      (l) => l === name || l === `/${name}` || l === `${name}*` || l === '.env.*' || l === '.env*',
-    );
+    .some((l) => l === name || l === `/${name}` || l === `${name}*` || l === '.env*');
 }
 
 /** Returns the new file text: the key line replaced (or appended), every other line untouched. */
@@ -52,13 +50,14 @@ export function withKey(existing: string | null, key: string): string {
 
 function writeSecretFile(file: string, text: string): void {
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, text, { mode: 0o600 });
-  fs.renameSync(tmp, file);
   try {
-    fs.chmodSync(file, 0o600); // owner only (no effect on Windows)
-  } catch {
-    // not supported on this system: the file is still ignored by git
+    fs.rmSync(tmp, { force: true }); // a stale file from an earlier run keeps its old permissions
+    fs.writeFileSync(tmp, text, { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } finally {
+    fs.rmSync(tmp, { force: true }); // never leave a copy of the key behind
   }
+  if (process.platform !== 'win32') fs.chmodSync(file, 0o600); // owner only; an error is reported
 }
 
 /** Returns the process exit code. */

@@ -47,9 +47,10 @@ export function buildRequestBody(req: AnalystRequest): Record<string, unknown> {
 const failure = (
   reason: 'api_error' | 'timeout' | 'refused' | 'truncated',
   detail: string,
+  billing: 'none' | 'unknown',
   inputTokens: number | null = null,
   outputTokens: number | null = null,
-): AnalystResult => ({ ok: false, reason, detail, inputTokens, outputTokens });
+): AnalystResult => ({ ok: false, reason, detail, billing, inputTokens, outputTokens });
 
 function httpDetail(status: number, requestId: string | null, errorType: string | null): string {
   const hint =
@@ -86,9 +87,13 @@ export function createAnthropicClient(apiKey: string, fetchImpl: FetchLike = fet
       } catch (error) {
         clearTimeout(timer);
         if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
-          return failure('timeout', `no answer within ${Math.round(req.timeoutMs / 1000)} seconds`);
+          return failure(
+            'timeout',
+            `no answer within ${Math.round(req.timeoutMs / 1000)} seconds`,
+            'unknown',
+          );
         }
-        return failure('api_error', 'the request could not be sent (network problem)');
+        return failure('api_error', 'the request could not be sent (network problem)', 'unknown');
       }
       try {
         const requestIdRaw = response.headers.get('request-id');
@@ -102,27 +107,35 @@ export function createAnthropicClient(apiKey: string, fetchImpl: FetchLike = fet
           } catch {
             errorType = null;
           }
-          return failure('api_error', httpDetail(response.status, requestId, errorType));
+          return failure('api_error', httpDetail(response.status, requestId, errorType), 'none');
         }
         let json: unknown;
         try {
           json = await response.json();
         } catch {
-          return failure('api_error', 'the reply could not be read');
+          return failure('api_error', 'the reply could not be read', 'unknown');
         }
         const parsed = responseSchema.safeParse(json);
-        if (!parsed.success) return failure('api_error', 'the reply had an unexpected shape');
+        if (!parsed.success)
+          return failure('api_error', 'the reply had an unexpected shape', 'unknown');
         const u = parsed.data.usage;
         const inputTokens =
           u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
         const outputTokens = u.output_tokens;
         const stop = parsed.data.stop_reason;
         if (stop === 'refusal')
-          return failure('refused', 'the model declined to answer', inputTokens, outputTokens);
+          return failure(
+            'refused',
+            'the model declined to answer',
+            'unknown',
+            inputTokens,
+            outputTokens,
+          );
         if (stop === 'max_tokens') {
           return failure(
             'truncated',
             'the answer was cut off at the size limit',
+            'unknown',
             inputTokens,
             outputTokens,
           );
@@ -131,19 +144,23 @@ export function createAnthropicClient(apiKey: string, fetchImpl: FetchLike = fet
           return failure(
             'api_error',
             'the reply ended in an unexpected way',
+            'unknown',
             inputTokens,
             outputTokens,
           );
         }
         const text = parsed.data.content
-          .filter((b) => b.type === 'text' && typeof b.text === 'string')
-          .map((b) => b.text as string)
+          .flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : []))
           .join('');
         return { ok: true, text, inputTokens, outputTokens };
       } catch {
         if (controller.signal.aborted)
-          return failure('timeout', `no answer within ${Math.round(req.timeoutMs / 1000)} seconds`);
-        return failure('api_error', 'the reply could not be read');
+          return failure(
+            'timeout',
+            `no answer within ${Math.round(req.timeoutMs / 1000)} seconds`,
+            'unknown',
+          );
+        return failure('api_error', 'the reply could not be read', 'unknown');
       } finally {
         clearTimeout(timer);
       }

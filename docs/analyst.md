@@ -165,6 +165,19 @@ size is capped.
 | The answer was cut off at the size limit      | The reply hit the size cap, so it was not used (it was billed).     |
 | The reply was not in the expected form        | The AI did not follow the JSON shape, so it was not used.           |
 
+## Known limits
+
+- A slow answer (up to a minute) can delay the live risk check on the New trade page, because the
+  browser sends its requests to the server one after another. The check catches up afterwards.
+- Asking exactly the same thing again returns the stored answer (nothing is sent). To get a fresh
+  answer, change the question or the data a little.
+- Figures quoted inside running sentences (not in the "Figures quoted" list) are not checked.
+- The wording check is a rough list of phrases: it can flag a sentence that only quotes one, and miss
+  an unusual phrasing. It only warns; it never decides.
+- Notes with 9 or more digits in a row (or card-style groups) are masked before sending, which can
+  also mask an order number you typed. Decimal prices are left alone.
+- If a request is sent but its answer cannot be read, it is counted at its worst-case cost.
+
 ## For developers
 
 - `src/domain/analyst/`: pure code (price table, caps, prompt builder, output checks). Tests beside it.

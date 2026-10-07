@@ -11,7 +11,8 @@ import type { AnalystKind } from './kinds';
  */
 
 // Control characters except newline and tab are removed; nothing else is changed.
-const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+const CONTROL =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0085\u2028\u2029\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 const text = (max: number) =>
   z
     .string()
@@ -117,8 +118,15 @@ const PATTERNS: RegExp[] = [
   /\b(?:ignore|bypass|skip|disregard|work\s+around|exceed|loosen)\s+(?:the\s+|your\s+|this\s+)?(?:risk\s+)?(?:limits?|stop(?:-loss)?|rules?|halt|verdict|engine)/i,
   /\boverride\s+(?:the\s+|your\s+)?(?:limit|halt|verdict|refusal|risk\s+engine)/i,
   /\bmove\s+(?:your|the)\s+stop/i,
-  /\btake\s+profit\s+(?:now|here)\b/i,
+  /\btake\s+profits?\s+(?:now|here|early)\b/i,
+  /\b(?:you\s+might|you\s+may)\s+want\s+to\s+(?:\w+\s+){0,2}?(?:buy|sell|short|close|exit|take\s+profit|add\s+to|reduce|increase)/i,
+  // a sentence that BEGINS with an order: "Sell now.", "Please exit.", "Reduce risk next week."
+  /^\s*(?:please\s+)?(?:buy|sell|short|exit|enter|close|reduce|raise|loosen|widen|increase|double)\b\s*(?:[.!]|$|now|the|this|your|it|more|half|early|here|at|when|if|risk|size|position|exposure|leverage|limits?)/i,
 ];
+
+/** A question that only asks ("Why did you add to the position?") is not an instruction. */
+const NEUTRAL_QUESTION =
+  /^\s*(?:why|what|how|when|which|where|did|do|does|have|has|is|are|was|were)\b[^]*\?\s*$/i;
 
 /** The values of every text field of an output (for scanning). */
 export function outputTexts(output: AnalystOutput): string[] {
@@ -136,6 +144,7 @@ export function findInstructionWording(texts: readonly string[]): string[] {
   const hits: string[] = [];
   for (const t of texts) {
     for (const sentence of t.split(/(?<=[.!?\n])\s+/)) {
+      if (NEUTRAL_QUESTION.test(sentence)) continue;
       if (PATTERNS.some((p) => p.test(sentence))) hits.push(sentence.trim().slice(0, 200));
     }
   }

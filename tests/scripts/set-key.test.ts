@@ -110,6 +110,17 @@ describe('npm run ai:set-key', () => {
     expect(envIsGitIgnored(envPath)).toBe(false);
   });
 
+  it('a .gitignore with only ".env.*" does NOT count (that pattern does not match ".env")', () => {
+    fs.writeFileSync(path.join(dir, '.gitignore'), '.env.*\n');
+    expect(envIsGitIgnored(envPath)).toBe(false);
+  });
+
+  it('never leaves a temporary copy of the key behind', async () => {
+    const key = fakeApiKey();
+    await setKeyFlow(fakeIo([key]).io, { envPath, argv: [] });
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('keeps Windows line endings', () => {
     const k = fakeApiKey();
     expect(withKey('A=1\r\nANTHROPIC_API_KEY=old\r\n', k)).toBe(

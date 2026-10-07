@@ -5,11 +5,13 @@ import {
   AI_CAP_DEFAULTS,
   AI_LOOSEN_DELAY_MS,
   checkCaps,
+  nextUtcMonthStart,
   parseCaps,
   parseCapsJson,
   parsePendingCapsJson,
   requestCapsChange,
   settleCaps,
+  utcMonthStart,
   type AiCaps,
   type UsageTotals,
 } from './caps';
@@ -161,5 +163,133 @@ describe('checkCaps', () => {
     expect(checkCaps(caps, usage({ callsThisMonth: 200 }), '0', dec)).toMatchObject({
       resetsAt: '2027-01-01T00:00:00.000Z',
     });
+  });
+});
+
+describe('caps: more rules of the pending timer', () => {
+  const active: AiCaps = { dailyCalls: 20, monthlyCalls: 200, monthlyCostUsd: '5' };
+  const LATER = new Date(NOW.getTime() + 3_600_000);
+
+  it('a different looser value replaces the pending one and restarts the 24 hours', () => {
+    const first = requestCapsChange(active, {}, { dailyCalls: 30 }, NOW);
+    const second = requestCapsChange(active, first.pending, { dailyCalls: 40 }, LATER);
+    expect(second.pending.dailyCalls?.value).toBe(40);
+    expect(second.pending.dailyCalls?.effectiveAt).toBe(
+      new Date(LATER.getTime() + AI_LOOSEN_DELAY_MS).toISOString(),
+    );
+  });
+  it('a lower (but still looser) value also replaces it', () => {
+    const first = requestCapsChange(active, {}, { dailyCalls: 50 }, NOW);
+    const second = requestCapsChange(active, first.pending, { dailyCalls: 30 }, LATER);
+    expect(second.pending.dailyCalls?.value).toBe(30);
+  });
+  it('a tightening cancels the pending value', () => {
+    const first = requestCapsChange(active, {}, { dailyCalls: 50 }, NOW);
+    const t = requestCapsChange(active, first.pending, { dailyCalls: 10 }, NOW);
+    expect(t.cancelled).toEqual(['dailyCalls']);
+    expect(t.active.dailyCalls).toBe(10);
+    expect(t.pending).toEqual({});
+  });
+  it('the same cost written differently keeps the timer', () => {
+    const first = requestCapsChange(active, {}, { monthlyCostUsd: '10' }, NOW);
+    const again = requestCapsChange(active, first.pending, { monthlyCostUsd: '10.0' }, LATER);
+    expect(again.deferred[0]?.effectiveAt).toBe(first.deferred[0]?.effectiveAt);
+  });
+  it('a mixed request reports every outcome at once', () => {
+    const base = requestCapsChange(active, {}, { monthlyCalls: 300 }, NOW); // pending
+    const r = requestCapsChange(
+      active,
+      base.pending,
+      { dailyCalls: 10, monthlyCalls: 200, monthlyCostUsd: '6' },
+      LATER,
+    );
+    expect(r.applied.map((a) => a.field)).toEqual(['dailyCalls']);
+    expect(r.cancelled).toEqual(['monthlyCalls']); // equal to active: cancels the pending 300
+    expect(r.deferred.map((d) => d.field)).toEqual(['monthlyCostUsd']);
+  });
+  it('settles only the fields that are due', () => {
+    const a = requestCapsChange(active, {}, { dailyCalls: 50 }, NOW);
+    const b = requestCapsChange(active, a.pending, { monthlyCalls: 300 }, LATER);
+    const s = settleCaps(active, b.pending, new Date(NOW.getTime() + AI_LOOSEN_DELAY_MS));
+    expect(s.caps.dailyCalls).toBe(50);
+    expect(s.caps.monthlyCalls).toBe(200);
+    expect(Object.keys(s.stillPending)).toEqual(['monthlyCalls']);
+  });
+});
+
+describe('cost cap values', () => {
+  it.each([
+    ['25', true],
+    ['25.000001', false],
+    ['0', false],
+    ['-1', false],
+    ['1e1', false],
+    [' 5 ', true],
+    ['05', true],
+    ['5.0', true],
+    ['', false],
+  ])('%j accepted: %s', (value, ok) => {
+    expect(parseCaps({ ...AI_CAP_DEFAULTS, monthlyCostUsd: value }).ok).toBe(ok);
+  });
+  it('is normalised (5.0 and 05 become 5)', () => {
+    const r = parseCaps({ ...AI_CAP_DEFAULTS, monthlyCostUsd: '05.0' });
+    expect(r.ok && r.caps.monthlyCostUsd).toBe('5');
+  });
+  it('call caps need whole numbers from 1 to the ceiling, not strings', () => {
+    expect(parseCaps({ ...AI_CAP_DEFAULTS, dailyCalls: 1 }).ok).toBe(true);
+    expect(parseCaps({ ...AI_CAP_DEFAULTS, dailyCalls: 0 }).ok).toBe(false);
+    expect(parseCaps({ ...AI_CAP_DEFAULTS, dailyCalls: '5' }).ok).toBe(false);
+  });
+});
+
+describe('checkCaps order and edges', () => {
+  it('reports the daily cap first when several are exceeded', () => {
+    const r = checkCaps(
+      AI_CAP_DEFAULTS,
+      { callsToday: 20, callsThisMonth: 200, costThisMonthUsd: '5' },
+      '1',
+      NOW,
+    );
+    expect(r).toMatchObject({ allowed: false, code: 'DAILY_CALLS' });
+  });
+  it('the daily reset rolls over a year end', () => {
+    const r = checkCaps(
+      AI_CAP_DEFAULTS,
+      usage({ callsToday: 20 }),
+      '0',
+      new Date('2026-12-31T23:59:00.000Z'),
+    );
+    expect(r).toMatchObject({ resetsAt: '2027-01-01T00:00:00.000Z' });
+  });
+  it('allows one below each call cap and refuses at it', () => {
+    expect(checkCaps(AI_CAP_DEFAULTS, usage({ callsThisMonth: 199 }), '0', NOW).allowed).toBe(true);
+    expect(checkCaps(AI_CAP_DEFAULTS, usage({ callsThisMonth: 200 }), '0', NOW).allowed).toBe(
+      false,
+    );
+  });
+  it('a projected cost of exactly the remaining budget is allowed', () => {
+    expect(checkCaps(AI_CAP_DEFAULTS, usage({ costThisMonthUsd: '4' }), '1', NOW).allowed).toBe(
+      true,
+    );
+  });
+  it('fails closed on Infinity, fractional counts and a negative or empty projection', () => {
+    for (const [u, p] of [
+      [usage({ callsToday: Infinity }), '0'],
+      [usage({ callsToday: 1.5 }), '0'],
+      [usage(), ''],
+    ] as const) {
+      expect(checkCaps(AI_CAP_DEFAULTS, u, p, NOW).allowed).toBe(false);
+    }
+  });
+  it('month boundaries are exact', () => {
+    expect(nextUtcMonthStart(new Date('2026-01-31T23:59:59.999Z')).toISOString()).toBe(
+      '2026-02-01T00:00:00.000Z',
+    );
+    expect(utcMonthStart(new Date('2024-02-29T12:00:00.000Z')).toISOString()).toBe(
+      '2024-02-01T00:00:00.000Z',
+    );
+    expect(nextUtcMonthStart(new Date('2024-02-29T12:00:00.000Z')).toISOString()).toBe(
+      '2024-03-01T00:00:00.000Z',
+    );
   });
 });

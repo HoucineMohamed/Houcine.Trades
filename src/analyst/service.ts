@@ -1,6 +1,6 @@
 import 'server-only';
 import { createHash } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import {
   AiDataError,
   getAiSettings,
@@ -17,6 +17,7 @@ import {
   checkCaps,
   checkOutput,
   estimateCostUsd,
+  isPricedModel,
   parseAnalystOutput,
   PRICE_TABLE,
   REQUEST_LIMITS,
@@ -24,7 +25,7 @@ import {
   type AnalystOutput,
   type BuiltPrompt,
 } from '@/domain/analyst';
-import type { AnalystClient } from '@/integrations/anthropic/types';
+import type { AnalystClient, AnalystResult } from '@/integrations/anthropic/types';
 
 /**
  * Runs one analyst request. EVERY gate is checked before anything leaves the computer, and each
@@ -90,10 +91,12 @@ export const inputHash = (model: string, built: BuiltPrompt): string =>
     .digest('hex');
 
 // One request at a time: the cap check and the usage write cannot be raced by two requests.
-let queue: Promise<unknown> = Promise.resolve();
+// Kept on globalThis so that separately bundled route/action copies of this file share ONE queue.
+const globalForQueue = globalThis as unknown as { __houcineAnalystQueue?: Promise<unknown> };
 function exclusive<T>(fn: () => Promise<T>): Promise<T> {
-  const run = queue.then(fn, fn);
-  queue = run.catch(() => undefined);
+  const previous = globalForQueue.__houcineAnalystQueue ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  globalForQueue.__houcineAnalystQueue = run.catch(() => undefined);
   return run;
 }
 
@@ -141,7 +144,7 @@ export async function runAnalyst(
   const caps = settings.effective;
 
   const model = runtime.model;
-  const price = PRICE_TABLE[model];
+  const price = isPricedModel(model) ? PRICE_TABLE[model] : undefined;
   if (!price) {
     return refuse(
       'model_unpriced',
@@ -150,21 +153,36 @@ export async function runAnalyst(
   }
 
   const hash = inputHash(model, built);
-  try {
-    const existing = db
+  // A stored answer for identical input is free. Looked up again inside the lock below, so two
+  // identical requests at the same moment cannot both be sent (and paid for).
+  const lookup = (): AnalystOutcome | null => {
+    const rows = db
       .select({ id: aiReviews.id })
       .from(aiReviews)
       .where(and(eq(aiReviews.kind, built.kind), eq(aiReviews.inputHash, hash)))
-      .limit(1)
-      .get();
-    const stored = existing ? getReview(db, existing.id) : null;
-    const outcome = stored ? fromStored(stored) : null;
-    if (outcome) return outcome;
+      .orderBy(desc(aiReviews.id))
+      .all();
+    for (const row of rows) {
+      const stored = getReview(db, row.id);
+      const outcome = stored ? fromStored(stored) : null;
+      if (outcome) return outcome; // the newest READABLE answer
+    }
+    return null;
+  };
+  try {
+    const hit = lookup();
+    if (hit) return hit;
   } catch {
     return refuse('storage_error', 'The stored answers could not be read, so nothing is sent.');
   }
 
   return exclusive(async () => {
+    try {
+      const hit = lookup();
+      if (hit) return hit;
+    } catch {
+      return refuse('storage_error', 'The stored answers could not be read, so nothing is sent.');
+    }
     let totals;
     try {
       totals = getUsageTotals(db, now);
@@ -187,7 +205,7 @@ export async function runAnalyst(
     if (!check.allowed) return refuse('cap_reached', check.message);
 
     // ---- the one request (no retry) -------------------------------------------------------
-    let result;
+    let result: AnalystResult;
     try {
       result = await runtime.client.complete({
         model,
@@ -199,68 +217,80 @@ export async function runAnalyst(
       });
     } catch {
       result = {
-        ok: false as const,
-        reason: 'api_error' as const,
+        ok: false,
+        reason: 'api_error',
         detail: 'unexpected failure',
+        billing: 'unknown',
         inputTokens: null,
         outputTokens: null,
       };
     }
 
-    // ---- decide the final status BEFORE writing (the usage log is append-only) --------------
-    let status: AiUsageStatus;
+    // ---- from here on the request MAY be billed: whatever happens, it is counted -----------
+    let status: AiUsageStatus = 'api_error';
     let inputTokens = 0;
     let outputTokens = 0;
-    let cost: string;
+    let cost = projected; // the worst case, unless something more exact is known below
     let output: AnalystOutput | null = null;
-    if (result.ok) {
-      inputTokens = result.inputTokens;
-      outputTokens = result.outputTokens;
-      const parsed = parseAnalystOutput(built.kind, result.text);
-      if (parsed.ok) {
-        status = 'ok';
-        output = parsed.output;
-      } else status = 'invalid_output';
-      cost = estimateCostUsd(model, inputTokens, outputTokens) ?? projected;
-    } else {
-      status = result.reason;
-      if (result.inputTokens !== null && result.outputTokens !== null) {
+    let checks: ReviewChecks | null = null;
+    try {
+      if (result.ok) {
         inputTokens = result.inputTokens;
         outputTokens = result.outputTokens;
         cost = estimateCostUsd(model, inputTokens, outputTokens) ?? projected;
-      } else if (result.reason === 'timeout') {
-        cost = projected; // the request may still have been billed: count the worst case
-      } else {
-        cost = '0.000000'; // refused before any work was done (an HTTP error)
-      }
-    }
-
-    const checks: ReviewChecks | null = output
-      ? (() => {
+        const parsed = parseAnalystOutput(built.kind, result.text);
+        if (parsed.ok) {
+          status = 'ok';
+          output = parsed.output;
           const c = checkOutput(output, built.allowedFigures);
-          return {
+          checks = {
             verified: c.figures.verified,
             unverified: c.figures.unverified,
             instructionHits: c.instructionHits,
             truncated: built.truncated,
             flagged: c.flagged,
           };
-        })()
-      : null;
+        } else status = 'invalid_output';
+      } else {
+        status = result.reason;
+        if (result.inputTokens !== null && result.outputTokens !== null) {
+          inputTokens = result.inputTokens;
+          outputTokens = result.outputTokens;
+          cost = estimateCostUsd(model, inputTokens, outputTokens) ?? projected;
+        } else if (result.billing === 'none') {
+          cost = '0.000000'; // the provider answered with an HTTP error: nothing was generated
+        }
+      }
+    } catch {
+      // an unexpected problem while checking the reply: keep the worst-case cost, show nothing
+      status = 'api_error';
+      output = null;
+      checks = null;
+    }
 
+    // The usage row is committed ON ITS OWN first, so a problem saving the review can never hide
+    // the spend from the caps. If even this fails, nothing is shown.
+    let usageId: number;
     try {
-      const saved = db.transaction((tx) => {
-        const usageId = recordUsage(tx, {
-          at: now,
-          feature: built.kind,
-          model,
-          inputTokens,
-          outputTokens,
-          estimatedCostUsd: cost,
-          status,
-        });
-        if (!output || !checks) return null;
-        const reviewId = saveReview(tx, {
+      usageId = recordUsage(db, {
+        at: now,
+        feature: built.kind,
+        model,
+        inputTokens,
+        outputTokens,
+        estimatedCostUsd: cost,
+        status,
+      });
+    } catch {
+      return refuse(
+        'storage_error',
+        'The request was sent but its usage could not be recorded, so the answer is not shown. Check the usage in the Anthropic console.',
+      );
+    }
+
+    if (output && checks) {
+      try {
+        const reviewId = saveReview(db, {
           at: now,
           kind: built.kind,
           accountId: meta.accountId,
@@ -274,23 +304,20 @@ export async function runAnalyst(
           usageId,
           model,
         });
-        return reviewId;
-      });
-      if (saved !== null && output && checks) {
         return {
           ok: true,
-          reviewId: saved,
+          reviewId,
           output,
           checks,
           fromStore: false,
           createdAt: now.toISOString(),
         };
+      } catch {
+        return refuse(
+          'storage_error',
+          'The answer was received and counted, but it could not be saved, so it is not shown.',
+        );
       }
-    } catch {
-      return refuse(
-        'storage_error',
-        'The answer could not be saved, so it is not shown. The request may still have been counted by the provider.',
-      );
     }
 
     if (status === 'invalid_output') {

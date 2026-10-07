@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  costFromPrice,
   DEFAULT_ANALYST_MODEL,
   estimateCostUsd,
   isPricedModel,
@@ -45,5 +46,23 @@ describe('estimateCostUsd', () => {
     expect(estimateCostUsd('claude-sonnet-5-5', 1.5, 0)).toBeNull();
     expect(estimateCostUsd('constructor', 1, 1)).toBeNull();
     expect(estimateCostUsd('__proto__', 1, 1)).toBeNull();
+  });
+});
+
+describe('rounding is UP (exercised with prices that need rounding)', () => {
+  const p = (inputPerMTok: string, outputPerMTok: string) => ({
+    inputPerMTok,
+    outputPerMTok,
+    supportsEffort: false,
+  });
+  it('1 token at 0.3 USD per million is 0.0000003, shown as 0.000001', () => {
+    expect(costFromPrice(p('0.3', '0'), 1, 0)).toBe('0.000001');
+  });
+  it('1 output token at 2.5 is 0.0000025, shown as 0.000003', () => {
+    expect(costFromPrice(p('0', '2.5'), 0, 1)).toBe('0.000003');
+  });
+  it('just over a boundary rounds up, exactly on it does not', () => {
+    expect(costFromPrice(p('1.1', '0'), 1_000_001, 0)).toBe('1.100002');
+    expect(costFromPrice(p('1', '0'), 1_000_000, 0)).toBe('1.000000');
   });
 });

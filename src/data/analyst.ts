@@ -145,17 +145,32 @@ export function setAiConsent(
   if (on) assertFreshAuth(auth, now, 'turning on "Send journal data to the AI"');
   db.transaction((tx) => {
     const view = getAiSettings(tx, now);
-    // A corrupt caps value is replaced by the defaults here: the safe direction (lowest ceilings).
-    const caps = view.active ?? { ...AI_CAP_DEFAULTS };
-    const settled = settleCaps(caps, view.effective ? view.pending : {}, now);
-    writeSettings(tx, { consent: on, caps: settled.caps, pending: settled.stillPending }, now);
+    if (view.problem !== null || view.effective === null) {
+      // Corrupt settings are never silently rewritten. OFF is always allowed (it only reduces what
+      // is sent) and touches nothing else; ON is refused until the settings are readable again.
+      if (on) {
+        throw new ValidationError([
+          {
+            field: '',
+            message: `The stored analyst settings are corrupt (${view.problem}), so the switch cannot be turned on.`,
+          },
+        ]);
+      }
+      tx.update(aiSettings)
+        .set({ consent: 0, updatedAt: now.toISOString() })
+        .where(eq(aiSettings.id, 1))
+        .run();
+    } else {
+      // `effective` already includes loosenings whose 24 hours passed, so they are kept, not lost.
+      writeSettings(tx, { consent: on, caps: view.effective, pending: view.pending }, now);
+    }
     appendAuthEvent(tx, {
       kind: on ? 'ai_consent_on' : 'ai_consent_off',
       now,
       sessionId: meta.sessionId ?? (auth ? auth.sessionId : null),
       ip: meta.ip,
       userAgent: meta.userAgent,
-      detail: 'privacy_switch',
+      detail: view.problem !== null ? 'privacy_switch_settings_corrupt' : 'privacy_switch',
     });
   });
 }
@@ -181,9 +196,13 @@ export function updateAiCaps(
         },
       ]);
     }
-    // Pending changes that are already due become active first (they were delayed and checked before).
-    const due = settleCaps(view.active, view.pending, now);
-    const result = requestCapsChange(due.caps, due.stillPending, requested, now);
+    // `effective` = the stored caps plus loosenings whose 24 hours have passed (already authorised),
+    // and `pending` = only those still waiting. Both are the base: nothing authorised is lost.
+    if (view.effective === null)
+      throw new ValidationError([
+        { field: '', message: 'The stored analyst settings are corrupt.' },
+      ]);
+    const result = requestCapsChange(view.effective, view.pending, requested, now);
     if (result.deferred.length > 0) assertFreshAuth(auth, now, 'loosening an analyst spend cap');
     writeSettings(tx, { consent: view.consent, caps: result.active, pending: result.pending }, now);
     const kinds = [

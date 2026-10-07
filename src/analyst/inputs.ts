@@ -17,6 +17,8 @@ import {
   type WeeklyReviewFacts,
 } from '@/domain/analyst';
 import type { TradePlan } from '@/domain/risk';
+import { isDecimalString } from '@/domain/money/decimal';
+import { safeToken } from '@/domain/analyst';
 import { computeAccountStats } from '@/domain/stats';
 
 /**
@@ -49,18 +51,40 @@ export function loadPlanReviewFacts(
   }
   const { verdict } = evaluatePlanForAccount(db, r.accountId, r.plan, now);
   const setupName = r.setupId === null ? null : (getSetup(db, r.setupId)?.name ?? null);
+  // The plan comes from the browser: only well-formed numbers and tokens go into the prompt.
+  const number = (v: string | null): string | null =>
+    v !== null && isDecimalString(v.trim()) ? v.trim() : null;
+  const badNumbers = [r.plan.entry, r.plan.stop, r.plan.target, r.plan.size].some(
+    (v) => v !== null && v.trim() !== '' && number(v) === null,
+  );
   return {
     ok: true,
     facts: {
       symbol: r.plan.symbol,
       plan: [
-        { key: 'direction', value: r.plan.direction },
-        { key: 'entry price', value: r.plan.entry, figure: true },
-        { key: 'stop-loss', value: r.plan.stop, figure: true },
-        { key: 'take-profit', value: r.plan.target, figure: true },
-        { key: 'size', value: r.plan.size, figure: true },
-        { key: 'quote currency', value: r.plan.quoteCurrency },
-        { key: 'account base currency', value: account.baseCurrency },
+        {
+          key: 'direction',
+          value:
+            r.plan.direction === 'short'
+              ? 'short'
+              : r.plan.direction === 'long'
+                ? 'long'
+                : 'invalid',
+        },
+        { key: 'entry price', value: number(r.plan.entry), figure: true },
+        { key: 'stop-loss', value: number(r.plan.stop), figure: true },
+        { key: 'take-profit', value: number(r.plan.target), figure: true },
+        { key: 'size', value: number(r.plan.size), figure: true },
+        { key: 'quote currency', value: safeToken(r.plan.quoteCurrency, 10) },
+        { key: 'account base currency', value: safeToken(account.baseCurrency, 10) },
+        ...(badNumbers
+          ? [
+              {
+                key: 'note',
+                value: 'a price or size in the plan was not a valid number and is shown as n/a',
+              },
+            ]
+          : []),
       ],
       setupName,
       planNotes: r.planNotes,

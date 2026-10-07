@@ -62,6 +62,8 @@ export function TradeForm({
   const [currencies, setCurrencies] = useState({ account: '', quote: '' });
   // only the newest reply may be shown: a slow reply for older values is ignored
   const request = useRef(0);
+  // a separate counter for the analyst, so editing the form cannot leave the button stuck
+  const askRequest = useRef(0);
 
   // Live checks: a moment after you stop typing, ask the server (same engine, same rules).
   const refresh = () => {
@@ -69,6 +71,8 @@ export function TradeForm({
     const values = formValues(new FormData(formRef.current));
     const mine = ++request.current;
     setReview(null); // an answer belongs to the exact values it was asked about
+    askRequest.current += 1; // an answer still on its way is for older values: ignore it
+    setAsking(false);
     setCurrencies({
       account: accounts.find((a) => String(a.id) === values.accountId)?.baseCurrency ?? '',
       quote: (values.quoteCurrency ?? '').trim().toUpperCase(),
@@ -124,23 +128,23 @@ export function TradeForm({
   const askAnalyst = () => {
     if (!formRef.current || !analyst) return;
     const values = formValues(new FormData(formRef.current));
-    const mine = ++request.current;
+    const mine = ++askRequest.current;
     setAsking(true);
     setReview(null);
     analyst
       .ask(values)
       .then((r) => {
-        if (mine === request.current) setReview(r);
+        if (mine === askRequest.current) setReview(r);
       })
       .catch(() => {
-        if (mine === request.current)
+        if (mine === askRequest.current)
           setReview({
             ok: false,
             message: 'The analyst could not run just now. Nothing was sent.',
           });
       })
       .finally(() => {
-        if (mine === request.current) setAsking(false);
+        if (mine === askRequest.current) setAsking(false);
       });
   };
 

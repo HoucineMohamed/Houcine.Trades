@@ -53,7 +53,15 @@ export function estimateCostUsd(
   ) {
     return null;
   }
-  const price = PRICE_TABLE[model] as ModelPrice;
+  return costFromPrice(PRICE_TABLE[model] as ModelPrice, inputTokens, outputTokens);
+}
+
+/** The arithmetic alone (exported so rounding can be tested with prices that need rounding). */
+export function costFromPrice(
+  price: ModelPrice,
+  inputTokens: number,
+  outputTokens: number,
+): string {
   const total = new Dec(inputTokens)
     .times(price.inputPerMTok)
     .plus(new Dec(outputTokens).times(price.outputPerMTok))

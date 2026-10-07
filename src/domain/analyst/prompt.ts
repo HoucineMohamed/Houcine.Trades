@@ -1,6 +1,6 @@
 import { REQUEST_LIMITS, TRUNCATION_MARKER } from './limits';
 import type { AnalystKind } from './kinds';
-import { safeSymbol, untrustedBlock } from './sanitize';
+import { oneLine, safeSymbol, untrustedBlock } from './sanitize';
 
 /**
  * Builds exactly what is sent to the AI: one system text and one user text. Pure and golden-tested.
@@ -113,7 +113,16 @@ Hard rules:
 5. Plain text only inside the JSON strings: no markdown, no HTML, no links, no images.
 6. If the input is missing something you need, say so in the text instead of guessing.`;
 
-const line = (f: Fact): string => `${f.key}: ${f.value === null ? 'n/a' : String(f.value)}`;
+const line = (f: Fact): string =>
+  `${f.key}: ${f.value === null ? 'n/a' : oneLine(String(f.value), 300)}`;
+
+const MAX_ENGINE_LINES = 20;
+const engineLines = (label: string, items: string[]): string[] => [
+  ...items.slice(0, MAX_ENGINE_LINES).map((t) => `${label}: ${oneLine(t, 400)}`),
+  ...(items.length > MAX_ENGINE_LINES
+    ? [`${label}: (${items.length - MAX_ENGINE_LINES} more not shown)`]
+    : []),
+];
 const figuresOf = (facts: Fact[]): string[] =>
   facts.filter((f) => f.figure && f.value !== null).map((f) => String(f.value));
 
@@ -149,8 +158,8 @@ export function buildPlanReviewPrompt(f: PlanReviewFacts): BuiltPrompt {
       'INPUT: risk engine verdict',
       [
         `verdict: ${f.verdict.approved ? 'APPROVED' : 'REFUSED'}`,
-        ...f.verdict.violations.map((v) => `refusal reason: ${v}`),
-        ...f.verdict.warnings.map((w) => `warning: ${w}`),
+        ...engineLines('refusal reason', f.verdict.violations),
+        ...engineLines('warning', f.verdict.warnings),
         ...f.verdictNumbers.map(line),
       ].join('\n'),
     ),
