@@ -13,6 +13,10 @@ export const AUTH_EVENT_KINDS = [
   'password_changed',
   'recovery_regenerated',
   'rate_limit_tripped',
+  // Analyst module: the privacy switch and the spend caps (detail is a short generic code).
+  'ai_consent_on',
+  'ai_consent_off',
+  'ai_caps_changed',
 ] as const;
 export type AuthEventKind = (typeof AUTH_EVENT_KINDS)[number];
 

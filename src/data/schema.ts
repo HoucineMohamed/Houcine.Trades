@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 // Relative imports on purpose: drizzle-kit loads this file without the "@/" alias.
 import { ACCOUNT_MODES } from '../domain/accounts/account';
+import { AI_USAGE_STATUSES, ANALYST_KINDS } from '../domain/analyst/kinds';
 import { ATTEMPT_KINDS, AUTH_EVENT_KINDS } from '../domain/auth/kinds';
 import { HALT_KINDS, RISK_EVENT_KINDS, VERDICT_STAGES } from '../domain/risk/kinds';
 import { ASSET_CLASSES, DIRECTIONS, STATUSES } from '../domain/trades/types';
@@ -260,3 +261,82 @@ export type OwnerRow = typeof owner.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type AuthEventRow = typeof authEvents.$inferSelect;
 export type RecoveryCodeRow = typeof recoveryCodes.$inferSelect;
+
+// ---------------------------------------------------------------------------------------------
+// Analyst (module 6). See docs/analyst.md. No prompt, answer or secret is ever stored in the usage log.
+// ---------------------------------------------------------------------------------------------
+
+/** The single settings row (id is always 1): the privacy switch and the spend caps. */
+export const aiSettings = sqliteTable(
+  'ai_settings',
+  {
+    id: integer('id').primaryKey(),
+    /** 1 = "Send journal data to the AI" is ON. Default OFF (no row means OFF). */
+    consent: integer('consent').notNull().default(0),
+    capsJson: text('caps_json').notNull(),
+    /** Loosened caps waiting for their effective time (JSON). */
+    pendingCapsJson: text('pending_caps_json').notNull().default('{}'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  () => [
+    check('ai_settings_single_row_check', sql.raw('id = 1')),
+    check('ai_settings_consent_check', sql.raw('consent IN (0, 1)')),
+  ],
+);
+
+/** Append-only log of requests that were actually sent (triggers refuse UPDATE and DELETE). */
+export const aiUsage = sqliteTable(
+  'ai_usage',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    createdAt: text('created_at').notNull(),
+    feature: text('feature', { enum: ANALYST_KINDS }).notNull(),
+    model: text('model').notNull(),
+    inputTokens: integer('input_tokens').notNull(),
+    outputTokens: integer('output_tokens').notNull(),
+    /** An ESTIMATE in USD (decimal text) from the price table. The console limit is the real stop. */
+    estimatedCostUsd: text('estimated_cost_usd').notNull(),
+    status: text('status', { enum: AI_USAGE_STATUSES }).notNull(),
+  },
+  () => [
+    index('ai_usage_created_at_idx').on(sql`created_at`),
+    check('ai_usage_feature_check', inList('feature', ANALYST_KINDS)),
+    check('ai_usage_status_check', inList('status', AI_USAGE_STATUSES)),
+    check('ai_usage_tokens_check', sql.raw('input_tokens >= 0 AND output_tokens >= 0')),
+  ],
+);
+
+/** Append-only stored results, so they can be read again without paying twice. */
+export const aiReviews = sqliteTable(
+  'ai_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind', { enum: ANALYST_KINDS }).notNull(),
+    accountId: integer('account_id').references(() => accounts.id, { onDelete: 'restrict' }),
+    /** Weekly review: the date range (YYYY-MM-DD) and the one currency it covers. */
+    rangeFrom: text('range_from'),
+    rangeTo: text('range_to'),
+    currency: text('currency'),
+    /** What was asked, in words (plan summary or the scrubbed question). Never a secret. */
+    subject: text('subject').notNull().default(''),
+    /** SHA-256 of exactly what was sent. */
+    inputHash: text('input_hash').notNull(),
+    /** The validated output (JSON). Re-validated whenever it is read. */
+    outputJson: text('output_json').notNull(),
+    /** Figure and wording checks, plus whether the input was truncated (JSON). */
+    checksJson: text('checks_json').notNull(),
+    usageId: integer('usage_id')
+      .notNull()
+      .references(() => aiUsage.id, { onDelete: 'restrict' }),
+    model: text('model').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  () => [
+    index('ai_reviews_kind_idx').on(sql`kind`, sql`id`),
+    check('ai_reviews_kind_check', inList('kind', ANALYST_KINDS)),
+  ],
+);
+
+export type AiSettingsRow = typeof aiSettings.$inferSelect;
+export type AiUsageRow = typeof aiUsage.$inferSelect;
+export type AiReviewRow = typeof aiReviews.$inferSelect;
