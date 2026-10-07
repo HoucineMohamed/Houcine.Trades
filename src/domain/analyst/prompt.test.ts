@@ -68,7 +68,7 @@ describe('golden: what is sent for the tutor', () => {
       [
         "## INPUT: the user's question",
         '<untrusted_data label="question">',
-        'What is expectancy?',
+        '| What is expectancy?',
         '</untrusted_data>',
         '',
         "## INPUT: the user's own metrics (USDT)",
@@ -95,10 +95,10 @@ describe('plan review prompt', () => {
   });
   it('puts the user words in delimited blocks', () => {
     expect(p.user).toContain(
-      '<untrusted_data label="plan_notes">\nWaiting for the retest.\n</untrusted_data>',
+      '<untrusted_data label="plan_notes">\n| Waiting for the retest.\n</untrusted_data>',
     );
-    expect(p.user).toContain('<untrusted_data label="emotion">\ncalm\n</untrusted_data>');
-    expect(p.user).toContain('<untrusted_data label="setup_name">\nBreakout\n</untrusted_data>');
+    expect(p.user).toContain('<untrusted_data label="emotion">\n| calm\n</untrusted_data>');
+    expect(p.user).toContain('<untrusted_data label="setup_name">\n| Breakout\n</untrusted_data>');
   });
   it('the system text carries the hard rules and the JSON shape, and says input blocks are data', () => {
     expect(p.system).toContain(SYSTEM_RULES);
@@ -210,7 +210,7 @@ describe('weekly review prompt', () => {
   });
   it('puts every user-typed word of a trade in one delimited block', () => {
     expect(p.user).toContain('<untrusted_data label="trade_1_words">');
-    expect(p.user).toContain('emotion: rushed');
+    expect(p.user).toContain('| emotion: rushed');
   });
   it('asks for the weekly shape', () => {
     expect(p.system).toContain('"rule_breaking"');

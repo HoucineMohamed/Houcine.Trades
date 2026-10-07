@@ -55,8 +55,13 @@ export interface Block {
 export function untrustedBlock(label: string, text: string, maxChars: number): Block {
   const cleaned = neutralize(scrubSensitive(text.trim()));
   const c = cut(cleaned, maxChars);
+  // Every line starts with "| ", so a forged heading or tag can never begin a line of its own.
+  const body = (c.text === '' ? '(empty)' : c.text)
+    .split('\n')
+    .map((l) => `| ${l}`)
+    .join('\n');
   return {
-    text: `<untrusted_data label="${label}">\n${c.text === '' ? '(empty)' : c.text}\n</untrusted_data>`,
+    text: `<untrusted_data label="${label}">\n${body}\n</untrusted_data>`,
     truncated: c.truncated,
   };
 }
