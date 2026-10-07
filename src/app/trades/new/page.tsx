@@ -1,9 +1,12 @@
 import Link from 'next/link';
+import { getAnalystAvailability } from '@/analyst/runtime';
+import { getAiSettings } from '@/data/analyst';
 import { listAccounts } from '@/data/accounts';
 import { listSetups } from '@/data/setups';
 import { selectedAccount } from '../../_lib/account';
 import { guardedPage } from '../../_lib/guard';
 import { Help } from '../../_lib/Help';
+import { askPlanReviewAction } from '../../analyst/actions';
 import { createTradeAction, previewRiskAction, sizeSuggestionAction } from '../actions';
 import { TradeForm } from '../TradeForm';
 
@@ -11,6 +14,15 @@ export default guardedPage(async (ctx) => {
   const accounts = listAccounts(ctx.db);
   const setups = listSetups(ctx.db);
   const { selected } = await selectedAccount(ctx);
+  const availability = getAnalystAvailability();
+  const settings = getAiSettings(ctx.db);
+  const unavailable = !availability.keyReady
+    ? (availability.message ?? 'The analyst is off.')
+    : settings.problem !== null
+      ? 'The analyst settings could not be read, so nothing is sent.'
+      : !settings.consent
+        ? 'The privacy switch "Send journal data to the AI" is off. Turn it on at the Analyst page to use this.'
+        : null;
   return (
     <main>
       <div className="page-head">
@@ -36,6 +48,7 @@ export default guardedPage(async (ctx) => {
           setups={setups}
           mode="create"
           stepUpFresh={ctx.auth !== null}
+          analyst={{ ask: askPlanReviewAction, unavailable }}
           initial={{
             accountId: String(selected?.id ?? accounts[0]?.id ?? ''),
             quoteCurrency: selected?.baseCurrency ?? '',

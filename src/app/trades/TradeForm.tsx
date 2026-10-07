@@ -4,6 +4,8 @@ import { useActionState, useEffect, useRef, useState, type ReactNode } from 'rea
 import { ASSET_CLASSES } from '@/domain/trades/types';
 import { emptyFormState, formValues, type FormState, type FormValues } from '../_lib/form';
 import { StepUpField } from '../_lib/StepUpField';
+import { AnalystOutputView } from '../analyst/AnalystOutputView';
+import type { AnalystActionResult } from '../analyst/types';
 import type { RiskPreview, SizeSuggestion } from './actions';
 
 interface Props {
@@ -21,6 +23,14 @@ interface Props {
   sizeHelper?: (values: FormValues) => Promise<SizeSuggestion>;
   /** A code was accepted in the last 5 minutes (so an override needs no new code). */
   stepUpFresh?: boolean;
+  /**
+   * Create mode: "Ask the analyst" (AI commentary after the risk verdict). `unavailable` is the
+   * plain reason it cannot run right now (no key, privacy switch off), or null.
+   */
+  analyst?: {
+    ask: (values: FormValues) => Promise<AnalystActionResult>;
+    unavailable: string | null;
+  };
 }
 
 export function TradeForm({
@@ -34,6 +44,7 @@ export function TradeForm({
   preview,
   sizeHelper,
   stepUpFresh = false,
+  analyst,
 }: Props) {
   const [state, formAction, pending] = useActionState(action, emptyFormState);
   const formRef = useRef<HTMLFormElement>(null);
@@ -44,6 +55,9 @@ export function TradeForm({
   const [checkFailed, setCheckFailed] = useState(false);
   const [suggestion, setSuggestion] = useState<SizeSuggestion | null>(null);
   const [suggestionFailed, setSuggestionFailed] = useState(false);
+  // the analyst's answer for the values currently in the form (cleared as soon as they change)
+  const [review, setReview] = useState<AnalystActionResult | null>(null);
+  const [asking, setAsking] = useState(false);
   // currencies of the plan being checked: amounts of the verdict are in the ACCOUNT currency
   const [currencies, setCurrencies] = useState({ account: '', quote: '' });
   // only the newest reply may be shown: a slow reply for older values is ignored
@@ -54,6 +68,7 @@ export function TradeForm({
     if (!formRef.current) return;
     const values = formValues(new FormData(formRef.current));
     const mine = ++request.current;
+    setReview(null); // an answer belongs to the exact values it was asked about
     setCurrencies({
       account: accounts.find((a) => String(a.id) === values.accountId)?.baseCurrency ?? '',
       quote: (values.quoteCurrency ?? '').trim().toUpperCase(),
@@ -105,6 +120,29 @@ export function TradeForm({
     return () => clearTimeout(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const askAnalyst = () => {
+    if (!formRef.current || !analyst) return;
+    const values = formValues(new FormData(formRef.current));
+    const mine = ++request.current;
+    setAsking(true);
+    setReview(null);
+    analyst
+      .ask(values)
+      .then((r) => {
+        if (mine === request.current) setReview(r);
+      })
+      .catch(() => {
+        if (mine === request.current)
+          setReview({
+            ok: false,
+            message: 'The analyst could not run just now. Nothing was sent.',
+          });
+      })
+      .finally(() => {
+        if (mine === request.current) setAsking(false);
+      });
+  };
 
   const useSuggestedSize = () => {
     const input = formRef.current?.elements.namedItem('size');
@@ -389,6 +427,36 @@ export function TradeForm({
                 {' | '}Reward-to-risk: {verdict.numbers.rewardToRisk ?? 'n/a'}
               </p>
             </>
+          )}
+        </section>
+      )}
+      {preview && analyst && verdict !== null && !checkFailed && (
+        <section className="notice notice-note" aria-live="polite">
+          <strong>Analyst (AI commentary, not advice; the risk engine decides)</strong>
+          <p className="small">
+            The analyst explains this plan and the verdict above and raises questions. It cannot
+            approve, refuse or change anything. It can take up to a minute.
+          </p>
+          {analyst.unavailable ? (
+            <p className="small">{analyst.unavailable}</p>
+          ) : (
+            <button type="button" className="secondary" onClick={askAnalyst} disabled={asking}>
+              {asking ? 'Asking the analyst…' : 'Ask the analyst'}
+            </button>
+          )}
+          {review && !review.ok && (
+            <p role="alert" className="notice notice-alert">
+              {review.message}
+            </p>
+          )}
+          {review && review.ok && (
+            <AnalystOutputView
+              kind={review.kind}
+              output={review.output}
+              checks={review.checks}
+              fromStore={review.fromStore}
+              createdAt={review.createdAt}
+            />
           )}
         </section>
       )}
