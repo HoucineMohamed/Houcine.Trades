@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { makeEvent } from './events';
+import { makeEvent, severityOf } from './events';
 import type { EventKind } from './kinds';
 import {
   alertHealth,
+  alertProblems,
   backoffMs,
+  HEARTBEAT_MAX_AGE_MS,
+  type HealthInput,
   itemStatus,
   NOTIFY_LIMITS,
   planBatch,
@@ -125,7 +128,7 @@ describe('planBatch (flood ceiling, summary, critical quota)', () => {
   const normals = (n: number) =>
     Array.from({ length: n }, (_, i) => item(100 + i, 'login_success', [], i));
   const sent = (n: number, kind: EventKind = 'login_success') =>
-    Array.from({ length: n }, () => ({ kind }));
+    Array.from({ length: n }, () => ({ kind, severity: severityOf(kind, null) }));
 
   it('sends everything while under the ceiling', () => {
     const p = planBatch({ due: normals(5), sentLastHour: [], summarySentLastHour: false });
@@ -187,30 +190,187 @@ describe('planBatch (flood ceiling, summary, critical quota)', () => {
   });
 });
 
-describe('alertHealth', () => {
-  const base = {
+describe('alertHealth / alertProblems', () => {
+  const base: HealthInput = {
     masterOn: true,
     channelReady: true,
-    recentStatuses: [] as const,
+    recentStatuses: [],
     oldestFailingAgeMs: null,
+    heartbeatAgeMs: 10_000,
+    settingsProblem: false,
+    expiredUnsent: 0,
+    collectorProblems: 0,
   };
   it('is off when the switch is off, whatever else is wrong', () => {
-    expect(alertHealth({ ...base, masterOn: false, channelReady: false })).toBe('off');
+    const all = {
+      ...base,
+      masterOn: false,
+      channelReady: false,
+      settingsProblem: true,
+      expiredUnsent: 3,
+      heartbeatAgeMs: null,
+    };
+    expect(alertHealth(all)).toBe('off');
+    expect(alertProblems(all)).toEqual([]);
   });
-  it('is ok when nothing fails', () => {
+  it('is ok when nothing is wrong', () => {
     expect(alertHealth(base)).toBe('ok');
-    expect(alertHealth({ ...base, recentStatuses: ['sent', 'failed', 'failed'] })).toBe('ok');
+    expect(alertProblems({ ...base, recentStatuses: ['sent', 'failed', 'failed'] })).toEqual([]);
   });
-  it('is failing when the channel is not configured, 3 attempts in a row failed, or an event has failed for 15 minutes', () => {
-    expect(alertHealth({ ...base, channelReady: false })).toBe('failing');
-    expect(alertHealth({ ...base, recentStatuses: ['failed', 'failed', 'failed'] })).toBe(
-      'failing',
+  it('each problem has its own code', () => {
+    expect(alertProblems({ ...base, channelReady: false })).toEqual(['channel']);
+    expect(alertProblems({ ...base, settingsProblem: true })).toEqual(['settings']);
+    expect(alertProblems({ ...base, recentStatuses: ['failed', 'failed', 'failed'] })).toEqual([
+      'delivery',
+    ]);
+    expect(alertProblems({ ...base, oldestFailingAgeMs: NOTIFY_LIMITS.failingAfterMs })).toEqual([
+      'delivery',
+    ]);
+    expect(alertProblems({ ...base, expiredUnsent: 1 })).toEqual(['expired']);
+    expect(alertProblems({ ...base, collectorProblems: 2 })).toEqual(['collector']);
+  });
+  it('a failing delivery is below the threshold until 15 minutes / 3 results in a row', () => {
+    expect(
+      alertProblems({ ...base, oldestFailingAgeMs: NOTIFY_LIMITS.failingAfterMs - 1 }),
+    ).toEqual([]);
+    expect(alertProblems({ ...base, recentStatuses: ['failed', 'failed'] })).toEqual([]);
+  });
+  it('a worker that never ran, or has not run for 3 cycles, is a problem (events are not being collected)', () => {
+    expect(alertProblems({ ...base, heartbeatAgeMs: null })).toEqual(['worker']);
+    expect(alertProblems({ ...base, heartbeatAgeMs: HEARTBEAT_MAX_AGE_MS })).toEqual([]);
+    expect(alertProblems({ ...base, heartbeatAgeMs: HEARTBEAT_MAX_AGE_MS + 1 })).toEqual([
+      'worker',
+    ]);
+    expect(HEARTBEAT_MAX_AGE_MS).toBe(3 * NOTIFY_LIMITS.workerIntervalMs);
+  });
+  it('several problems are all reported, and any of them is "failing"', () => {
+    const all = { ...base, channelReady: false, expiredUnsent: 2, heartbeatAgeMs: null };
+    expect(alertProblems(all)).toEqual(['channel', 'worker', 'expired']);
+    expect(alertHealth(all)).toBe('failing');
+  });
+});
+
+describe('itemStatus: exact boundaries and unreadable data', () => {
+  const sending = (ms: number): AttemptRecord => ({
+    status: 'sending',
+    at: at(ms),
+    retryAfterS: null,
+  });
+  const now = (ms: number) => new Date(T0.getTime() + ms);
+  it('a claim becomes stale at EXACTLY the stale time', () => {
+    const i = item(1, 'login_success', [sending(0)]);
+    expect(itemStatus(i, now(NOTIFY_LIMITS.staleSendingMs - 1)).status).toBe('in_flight');
+    expect(itemStatus(i, now(NOTIFY_LIMITS.staleSendingMs)).failures).toBe(1);
+  });
+  it('the stale window is longer than a full batch of slow sends', () => {
+    expect(NOTIFY_LIMITS.staleSendingMs).toBeGreaterThanOrEqual(10 * MIN);
+  });
+  it('the backoff after the 3rd and later failures is exact, and capped', () => {
+    const f3 = item(1, 'login_success', [failed(0), failed(1000), failed(2000)]);
+    expect(itemStatus(f3, now(2000 + 4 * MIN - 1)).status).toBe('waiting');
+    expect(itemStatus(f3, now(2000 + 4 * MIN))).toMatchObject({
+      status: 'due',
+      nextAt: at(2000 + 4 * MIN),
+    });
+    const f7 = item(
+      1,
+      'login_success',
+      Array.from({ length: 7 }, (_, i) => failed(i * 1000)),
     );
-    expect(alertHealth({ ...base, oldestFailingAgeMs: NOTIFY_LIMITS.failingAfterMs })).toBe(
-      'failing',
-    );
-    expect(alertHealth({ ...base, oldestFailingAgeMs: NOTIFY_LIMITS.failingAfterMs - 1 })).toBe(
-      'ok',
-    );
+    expect(itemStatus(f7, now(6000 + 30 * MIN - 1)).status).toBe('waiting');
+    expect(itemStatus(f7, now(6000 + 30 * MIN)).status).toBe('due');
+  });
+  it('expired beats in flight, due and waiting, but SENT beats expired', () => {
+    const old = -NOTIFY_LIMITS.maxAgeMs - 1000;
+    expect(itemStatus(item(1, 'login_success', [sending(0)], old), T0).status).toBe('expired');
+    expect(itemStatus(item(2, 'login_success', [failed(0)], old), T0).status).toBe('expired');
+    const sent: AttemptRecord = { status: 'sent', at: at(0), retryAfterS: null };
+    expect(itemStatus(item(3, 'login_success', [sent], old), T0).status).toBe('sent');
+  });
+  it('several unresolved claims are several failures', () => {
+    const i = item(1, 'login_success', [sending(0), sending(MIN), sending(2 * MIN)]);
+    expect(itemStatus(i, now(2 * MIN + NOTIFY_LIMITS.staleSendingMs))).toMatchObject({
+      failures: 3,
+      status: 'due',
+    });
+  });
+  it('a retry-after belongs to its own failure only, and equal to the backoff changes nothing', () => {
+    const i = item(1, 'login_success', [
+      sending(0),
+      failed(100, 300),
+      sending(400_000),
+      failed(400_100),
+    ]);
+    expect(itemStatus(i, now(400_100 + 2 * MIN - 1)).status).toBe('waiting'); // second backoff, no carry-over
+    expect(itemStatus(i, now(400_100 + 2 * MIN)).status).toBe('due');
+    const eq = item(2, 'login_success', [failed(0, 60)]);
+    expect(itemStatus(eq, now(60_000)).status).toBe('due');
+  });
+  it('a result row with the same time as its claim still pairs, in either listing order', () => {
+    const a = item(1, 'login_success', [sending(0), failed(0)]);
+    const b = item(1, 'login_success', [failed(0), sending(0)]);
+    expect(itemStatus(a, now(1000)).failures).toBe(1);
+    expect(itemStatus(a, now(1000)).status).toBe('waiting');
+    expect(itemStatus(b, now(MIN + 1000)).status).not.toBe('sent'); // (this order is not produced by the data layer)
+  });
+  it('an unreadable attempt time or a huge retry-after never throws and never waits longer than the cap', () => {
+    const garbage = item(1, 'login_success', [
+      { status: 'failed', at: 'garbage', retryAfterS: null },
+    ]);
+    expect(() => itemStatus(garbage, T0)).not.toThrow();
+    expect(itemStatus(garbage, T0).status).toBe('waiting');
+    for (const retryAfterS of [1e13, Infinity, Number.NaN, -5]) {
+      const i = item(2, 'login_success', [failed(0, retryAfterS)]);
+      const st = itemStatus(i, now(NOTIFY_LIMITS.backoffCapMs));
+      expect(['waiting', 'due']).toContain(st.status);
+      if (retryAfterS > 0) expect(st.status).toBe('due'); // capped at 30 minutes, not 1e13 seconds
+    }
+  });
+  it('an event whose own time cannot be read is shown as expired and never sent', () => {
+    const bad = { ...item(1), event: { ...item(1).event, occurredAt: 'not a time' } };
+    expect(itemStatus(bad, T0).status).toBe('expired');
+  });
+});
+
+describe('planBatch: exact ceilings and ordering', () => {
+  const sent = (n: number, kind: EventKind = 'login_success') =>
+    Array.from({ length: n }, () => ({ kind, severity: severityOf(kind, null) }));
+  const plan = (due: OutboxItem[], used: number) =>
+    planBatch({ due, sentLastHour: sent(used), summarySentLastHour: true });
+  it('the normal ceiling: 19 used lets one more through, 20 holds it', () => {
+    expect(plan([item(1)], 19).send).toHaveLength(1);
+    expect(plan([item(1)], 20).send).toHaveLength(0);
+  });
+  it('the critical ceiling: 29 used lets one through, 30 holds it', () => {
+    expect(plan([item(1, 'recovery_code_used')], 29).send).toHaveLength(1);
+    expect(plan([item(1, 'recovery_code_used')], 30).send).toHaveLength(0);
+  });
+  it('same time, same severity: lower id first, whatever the input order', () => {
+    const due = [
+      item(5, 'recovery_code_used'),
+      item(2, 'recovery_code_used'),
+      item(9, 'recovery_code_used'),
+    ];
+    expect(plan(due, 0).send.map((i) => i.id)).toEqual([2, 5, 9]);
+    expect(plan([...due].reverse(), 0).send.map((i) => i.id)).toEqual([2, 5, 9]);
+  });
+  it('a summary needs held events AND no summary this hour; held criticals count', () => {
+    expect(
+      planBatch({ due: [], sentLastHour: [], summarySentLastHour: false }).summaryCount,
+    ).toBeNull();
+    const held = [item(1, 'recovery_code_used')];
+    expect(
+      planBatch({ due: held, sentLastHour: sent(30), summarySentLastHour: false }).summaryCount,
+    ).toBe(1);
+  });
+  it('the critical events share the hourly counter (15 critical + 20 normal send 30, not 35)', () => {
+    const due = [
+      ...Array.from({ length: 15 }, (_, i) => item(100 + i, 'recovery_code_used', [], i)),
+      ...Array.from({ length: 20 }, (_, i) => item(200 + i, 'login_success', [], i)),
+    ];
+    const p = plan(due, 0);
+    expect(p.send).toHaveLength(30);
+    expect(p.send.filter((i) => i.event.severity === 'critical')).toHaveLength(15);
+    expect(p.send.filter((i) => i.event.severity !== 'critical')).toHaveLength(15);
   });
 });

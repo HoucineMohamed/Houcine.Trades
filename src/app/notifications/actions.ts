@@ -59,7 +59,17 @@ export const setMasterAction = guardedAction(async (ctx, formData: FormData) => 
         ]);
       }
       const auth = requireFreshAuth(ctx, formData, 'turning on alerts');
-      setNotificationsMaster(ctx.db, true, auth, now, meta(ctx), collectorBaseline(ctx.db, now));
+      const baseline = collectorBaseline(ctx.db, now);
+      if (baseline.problems.length > 0) {
+        // Starting from a state that could not be read would announce old levels as new: refuse instead.
+        throw new ValidationError([
+          {
+            field: '',
+            message: `Alerts cannot be turned on yet: part of the current state could not be read (${baseline.problems.join(', ')}).`,
+          },
+        ]);
+      }
+      setNotificationsMaster(ctx.db, true, auth, now, meta(ctx), baseline.state);
       target = back(
         'ok',
         'Alerts are ON. Only events from now on are announced. The change was logged.',
@@ -67,15 +77,18 @@ export const setMasterAction = guardedAction(async (ctx, formData: FormData) => 
     } else {
       const auth = requireFreshAuth(ctx, formData, 'turning off alerts');
       setNotificationsMaster(ctx.db, false, auth, now, meta(ctx));
-      // The one last message. A failure here never matters: it is retried by the worker.
+      // The one last message. A failure here never blocks the switch; the owner is told what happened.
+      let finalNotice =
+        'The final notice could not be sent right now (it is retried by the worker for up to 24 hours).';
       try {
-        await deliverPending(ctx.db, getChannelRuntime().channel);
+        const r = await deliverPending(ctx.db, getChannelRuntime().channel);
+        if (r.sent > 0) finalNotice = 'One last notice, "Alerts were switched off", was sent.';
       } catch {
-        // recorded in the outbox; nothing to do here
+        // recorded in the outbox; the sentence above says so
       }
       target = back(
         'ok',
-        'Alerts are OFF. Nothing more is sent except one last notice. The change was logged.',
+        `Alerts are OFF. Nothing more is sent except that one last notice. ${finalNotice} The change was logged.`,
       );
     }
   } catch (error) {
@@ -127,6 +140,11 @@ export const testMessageAction = guardedAction(async (ctx) => {
     if (r.ok) target = back('ok', 'The test message was sent. Check your phone.');
     else if (r.reason === 'off')
       target = back('error', 'Alerts are OFF, so nothing is sent. Turn them on first.');
+    else if (r.reason === 'too_soon')
+      target = back(
+        'error',
+        'A test message was sent a moment ago. Wait a minute before sending another.',
+      );
     else if (r.reason === 'channel_not_configured')
       target = back('error', 'Telegram is not set up (see docs/notifications.md).');
     else
@@ -152,6 +170,11 @@ export const deliverNowAction = guardedAction(async (ctx) => {
       );
     else if (r.deliver?.skipped === 'channel_not_configured')
       target = back('error', 'Telegram is not set up (see docs/notifications.md).');
+    else if (r.problems.length > 0)
+      target = back(
+        'error',
+        `Done, but with problems: ${r.problems.join(', ')}. Nothing else is affected.`,
+      );
     else {
       const d = r.deliver;
       target = back(

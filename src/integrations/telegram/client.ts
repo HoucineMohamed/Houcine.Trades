@@ -55,6 +55,8 @@ async function call(
     try {
       json = await response.json();
     } catch {
+      // A timeout while reading the body is a timeout (the message may have been delivered).
+      if (controller.signal.aborted) return { ok: false, code: 'timeout' };
       json = null;
     }
     return { ok: true, reply: { status: response.status, json } };

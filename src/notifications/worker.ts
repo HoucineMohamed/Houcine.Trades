@@ -1,6 +1,6 @@
 import 'server-only';
 import type { Db } from '@/data/client';
-import { getNotificationSettings } from '@/data/notifications';
+import { getNotificationSettings, writeHeartbeat } from '@/data/notifications';
 import { NOTIFY_LIMITS } from '@/domain/notifications';
 import type { NotificationChannel } from '@/integrations/telegram/types';
 import { collectEvents, type CollectReport } from './collector';
@@ -16,7 +16,9 @@ export interface CycleReport {
   collect: CollectReport | null;
   deliver: DeliveryReport | null;
   /** Short codes of what went wrong (no free text). */
-  errors: ('collect_failed' | 'deliver_failed')[];
+  errors: ('collect_failed' | 'deliver_failed' | 'heartbeat_failed')[];
+  /** Every short code worth showing to the owner (collector problems, skipped delivery, storage problems). */
+  problems: string[];
 }
 
 export async function runCycle(
@@ -25,7 +27,7 @@ export async function runCycle(
   options: DeliveryOptions = {},
 ): Promise<CycleReport> {
   const clock = options.clock ?? (() => new Date());
-  const report: CycleReport = { collect: null, deliver: null, errors: [] };
+  const report: CycleReport = { collect: null, deliver: null, errors: [], problems: [] };
   try {
     if (getNotificationSettings(db, clock()).master) report.collect = collectEvents(db, clock());
   } catch {
@@ -35,6 +37,19 @@ export async function runCycle(
     report.deliver = await deliverPending(db, channel, options);
   } catch {
     report.errors.push('deliver_failed');
+  }
+  report.problems = [
+    ...report.errors,
+    ...(report.collect?.problems ?? []),
+    ...(report.deliver?.skipped ? [`skipped_${report.deliver.skipped}`] : []),
+    ...(report.deliver?.storageProblem ? ['storage_problem'] : []),
+  ];
+  // Proof that a cycle ran (the header says "worker not running" without it) and what it could not do.
+  try {
+    writeHeartbeat(db, clock(), report.problems);
+  } catch {
+    report.errors.push('heartbeat_failed');
+    report.problems.push('heartbeat_failed');
   }
   return report;
 }
@@ -53,12 +68,25 @@ export async function runWorker(input: {
     input.sleep ??
     ((ms: number, signal: AbortSignal) =>
       new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, ms);
-        signal.addEventListener('abort', () => (clearTimeout(t), resolve()), { once: true });
+        if (signal.aborted) return resolve();
+        const onAbort = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          signal.removeEventListener('abort', onAbort); // no listener is left behind after each cycle
+          resolve();
+        }, ms);
+        signal.addEventListener('abort', onAbort, { once: true });
       }));
+  const options: DeliveryOptions = { ...input.options, signal: input.signal };
   while (!input.signal.aborted) {
-    const r = await runCycle(input.db, input.channel, input.options);
-    input.onCycle?.(r);
+    const r = await runCycle(input.db, input.channel, options);
+    try {
+      input.onCycle?.(r);
+    } catch {
+      // a failing logger must never stop the worker
+    }
     if (input.signal.aborted) break;
     await sleep(interval, input.signal);
   }

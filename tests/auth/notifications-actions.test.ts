@@ -252,3 +252,55 @@ describe('test message and "Deliver now"', () => {
     expect(await url(a.deliverNowAction())).toContain('not set up');
   });
 });
+
+describe('more action-layer rules', () => {
+  it('switching ON again while ON changes nothing', async () => {
+    const a = await import('@/app/notifications/actions');
+    enableAlerts(db(), new Date());
+    const before = JSON.stringify(readAllState(db()));
+    db().$client.prepare('UPDATE sessions SET step_up_at = NULL').run();
+    await url(a.setMasterAction(form({ master: 'on', understood: 'yes', stepUpCode: nextCode() })));
+    expect(JSON.stringify(readAllState(db()))).toBe(before);
+  });
+  it('ON is refused when the current state cannot be read (it would announce old levels as new)', async () => {
+    const a = await import('@/app/notifications/actions');
+    db().$client.exec('ALTER TABLE ai_usage RENAME TO ai_usage_gone');
+    const r = await url(
+      a.setMasterAction(form({ master: 'on', understood: 'yes', stepUpCode: nextCode() })),
+    );
+    expect(r).toContain('cannot be turned on yet');
+    expect(getNotificationSettings(db()).master).toBe(false);
+  });
+  it('OFF tells the truth about the final notice', async () => {
+    const a = await import('@/app/notifications/actions');
+    enableAlerts(db(), new Date());
+    db().$client.prepare('UPDATE sessions SET step_up_at = NULL').run();
+    const sent = await url(a.setMasterAction(form({ master: 'off', stepUpCode: nextCode() })));
+    expect(sent).toContain('"Alerts were switched off", was sent');
+    // and when the channel is not set up
+    enableAlerts(db(), new Date());
+    getNotificationSettings(db());
+    db().$client.prepare('UPDATE notification_settings SET master = 1').run();
+    rt.configured = false;
+    db().$client.prepare('UPDATE sessions SET step_up_at = ?').run(new Date().toISOString());
+    const notSent = await url(a.setMasterAction(form({ master: 'off' })));
+    expect(notSent).toContain('could not be sent right now');
+    expect(notSent).not.toContain('was sent');
+  });
+  it('the test message is limited to one a minute', async () => {
+    const a = await import('@/app/notifications/actions');
+    enableAlerts(db(), new Date());
+    expect(await url(a.testMessageAction())).toContain('test message was sent');
+    expect(await url(a.testMessageAction())).toContain('Wait a minute');
+    expect(rt.channel?.calls).toBe(1);
+  });
+  it('"Deliver now" names the problems instead of just saying "Done"', async () => {
+    const a = await import('@/app/notifications/actions');
+    enableAlerts(db(), new Date());
+    db().$client.prepare("UPDATE ai_settings SET caps_json = 'junk'").run();
+    db().$client.exec(
+      "INSERT OR REPLACE INTO ai_settings (id, consent, caps_json, updated_at) VALUES (1, 0, 'junk', 't')",
+    );
+    expect(await url(a.deliverNowAction())).toContain('with problems: analyst_settings');
+  });
+});

@@ -447,3 +447,73 @@ describe('seeded hostile data never reaches a message', () => {
     ).not.toContain('HOSTILE');
   });
 });
+
+describe('when the log cannot be written, the batch stops and nothing is repeated blindly', () => {
+  it('stops at the first unwritable result, releases the rest, and reports the storage problem', async () => {
+    const { db, opts } = setup();
+    add(db, ev(1), ev(2), ev(3));
+    const ch = fakeChannel();
+    // After the claims are written, make writing a RESULT impossible (a full disk, a locked file).
+    db.$client.exec(
+      "CREATE TRIGGER block_results BEFORE INSERT ON notification_deliveries WHEN NEW.status <> 'sending' BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    const r = await deliverPending(db, ch, opts);
+    expect(r.storageProblem).toBe(true);
+    expect(ch.calls).toBe(1); // the first send happened; no further message was sent without a log
+    expect(r.sent).toBe(0);
+  });
+});
+
+describe('Ctrl+C between messages releases the rest', () => {
+  it('stops sending, and the unsent events come back after the normal backoff (nothing is lost)', async () => {
+    const { db, at, clock } = setup();
+    add(db, ev(1), ev(2), ev(3));
+    const controller = new AbortController();
+    const ch = fakeChannel((_text, n) => {
+      if (n === 1) controller.abort();
+      return { ok: true };
+    });
+    const r = await deliverPending(db, ch, { clock, sleep: noSleep, signal: controller.signal });
+    expect(ch.calls).toBe(1);
+    expect(r).toMatchObject({ sent: 1, failed: 2 });
+    at(61_000);
+    const later = fakeChannel();
+    await deliverPending(db, later, { clock, sleep: noSleep });
+    expect(later.calls).toBe(2);
+  });
+});
+
+describe('a huge retry-after cannot push an event past its expiry', () => {
+  it('is capped at 30 minutes', async () => {
+    const { db, at, opts } = setup();
+    add(db, ev(1));
+    const ch = fakeChannel([failSend('rate_limited', 86_400), { ok: true }]);
+    await deliverPending(db, ch, opts);
+    at(NOTIFY_LIMITS.backoffCapMs);
+    expect((await deliverPending(db, ch, opts)).sent).toBe(1);
+  });
+});
+
+describe('the test message', () => {
+  it('at most one a minute (a double click cannot buzz the phone)', async () => {
+    const { db, at, opts } = setup();
+    const ch = fakeChannel();
+    expect(await sendTestMessage(db, ch, opts)).toEqual({ ok: true });
+    at(10_000);
+    expect(await sendTestMessage(db, ch, opts)).toEqual({
+      ok: false,
+      reason: 'too_soon',
+      code: null,
+    });
+    expect(ch.calls).toBe(1);
+    at(61_000);
+    expect(await sendTestMessage(db, ch, opts)).toEqual({ ok: true });
+  });
+  it('is found by its own key, not by position in a list', async () => {
+    const { db, opts } = setup();
+    add(db, ...Array.from({ length: 60 }, (_, i) => ev(i + 1, 'login_success', i + 1000)));
+    const ch = fakeChannel();
+    const r = await sendTestMessage(db, ch, opts);
+    expect(r.ok === true || r.reason !== 'held').toBe(true);
+  });
+});

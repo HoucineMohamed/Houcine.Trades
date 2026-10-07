@@ -135,3 +135,76 @@ describe('state helpers', () => {
     expect(utcMonthKey(new Date('2026-12-31T23:59:59.999Z'))).toBe('2026-12');
   });
 });
+
+describe('levelFromShare / levelFromCap: exact boundaries and odd input', () => {
+  it('49.99999999 is 0, exactly 50 is 50, 79.999999999999999999 is 50, exactly 80 is 80 (no float error)', () => {
+    expect(levelFromShare('49.9999999999', false)).toBe(0);
+    expect(levelFromShare('50', false)).toBe(50);
+    expect(levelFromShare('79.999999999999999999', false)).toBe(50);
+    expect(levelFromShare('80', false)).toBe(80);
+  });
+  it('only a confirmed "reached" gives 100: an unconfirmed share of 100 or more is 80', () => {
+    expect(levelFromShare('100', null)).toBe(80);
+    expect(levelFromShare('250', null)).toBe(80);
+    expect(levelFromShare('100', false)).toBe(80);
+    expect(levelFromShare('100', true)).toBe(100);
+  });
+  it('unreadable shares are unknown, not zero', () => {
+    for (const bad of ['1e2', ' 80', '-5', 'abc', '']) expect(levelFromShare(bad, null)).toBeNull();
+    expect(levelFromShare('1e2', false)).toBeNull(); // unreadable is unknown even when "not reached" is known
+    expect(levelFromShare(null, false)).toBeNull();
+  });
+  it('levelFromCap is exact decimal arithmetic', () => {
+    expect(levelFromCap(2.4, 3)).toBe(80);
+    expect(levelFromCap(0.1 + 0.2, 0.3)).toBe(100);
+    expect(levelFromCap(2, 3)).toBe(50);
+    expect(levelFromCap(7, 14)).toBe(50);
+    expect(levelFromCap('0.0000001', '1')).toBe(0);
+    expect(levelFromCap('99999999999999999999', '3')).toBe(100);
+  });
+  it('and null for numbers it cannot read', () => {
+    for (const bad of [Number.NaN, Infinity, '-1', 1e21, '1e1'])
+      expect(levelFromCap(bad, 5)).toBeNull();
+  });
+});
+
+describe('stepLimit: more boundaries', () => {
+  const run = (prev: LimitState | null, level: Level | null, now: Date, period = 'p') =>
+    stepLimit(prev, level, period, 'b', now);
+  it('the cooldown ends at EXACTLY one hour', () => {
+    const up = run(null, 80, T0);
+    const down = run(up.state, 50, later(1000));
+    expect(run(down.state, 80, later(COOLDOWN_MS - 1)).announce).toBeNull();
+    const again = run(down.state, 80, later(COOLDOWN_MS));
+    expect(again.announce?.level).toBe(80);
+  });
+  it('the epoch goes up once per drop (100 to 50 to 0 is two), and not when nothing changes', () => {
+    const a = run(null, 100, T0);
+    const b = run(a.state, 50, later(1000));
+    const c = run(b.state, 0, later(2000));
+    expect([a.state.epoch, b.state.epoch, c.state.epoch]).toEqual([0, 1, 2]);
+    expect(run(c.state, 0, later(3000)).state.epoch).toBe(2);
+  });
+  it('the cooldown is per level: 80 then 100 within the hour announces both', () => {
+    const a = run(null, 80, T0);
+    const b = run(a.state, 100, later(60_000));
+    expect(b.announce?.level).toBe(100);
+  });
+  it('a new period resets the cooldown too, even with an unreadable first reading', () => {
+    const a = run(null, 80, T0, '2026-03');
+    const nullStep = run(a.state, null, later(1000), '2026-04');
+    expect(nullStep.announce).toBeNull();
+    expect(nullStep.state).toMatchObject({ periodKey: '2026-04', level: 0, lastAnnounced: {} });
+    expect(run(a.state, 80, later(1000), '2026-04').announce?.level).toBe(80);
+  });
+  it('parseLimitState is strict', () => {
+    const ok = JSON.stringify({ periodKey: 'p', level: 50, epoch: 0, lastAnnounced: {} });
+    expect(parseLimitState(ok)).not.toBeNull();
+    for (const bad of [
+      { periodKey: 'p', level: 60, epoch: 0, lastAnnounced: {} },
+      { periodKey: 'p', level: 50, epoch: -1, lastAnnounced: {} },
+      { periodKey: 'p', level: 50, epoch: 0, lastAnnounced: {}, extra: 1 },
+    ])
+      expect(parseLimitState(JSON.stringify(bad))).toBeNull();
+  });
+});

@@ -191,6 +191,26 @@ describe('the token never leaves the adapter', () => {
   });
 });
 
+describe('a timeout while the reply body is being read', () => {
+  it('is a timeout (the message may have been delivered), not a bad reply', async () => {
+    const token = fakeBotToken();
+    const channel = createTelegramChannel({
+      token,
+      chatId: fakeChatId(),
+      timeoutMs: 20,
+      fetchImpl: async (_u, init) =>
+        ({
+          status: 200,
+          json: () =>
+            new Promise((_res, reject) =>
+              init.signal?.addEventListener('abort', () => reject(new Error('aborted'))),
+            ),
+        }) as unknown as Response,
+    });
+    expect(await channel.send('x')).toEqual({ ok: false, code: 'timeout', retryAfterS: null });
+  });
+});
+
 describe('getUpdates (pairing) replies', () => {
   const src = (res: (c: Call) => Response) => {
     const token = fakeBotToken();

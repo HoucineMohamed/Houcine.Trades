@@ -16,8 +16,8 @@ export const NOTIFY_LIMITS = {
   maxAgeMs: 24 * 60 * 60 * 1000,
   backoffMs: [60_000, 120_000, 240_000, 480_000, 960_000],
   backoffCapMs: 30 * 60_000,
-  /** A "sending" attempt with no result after this long counts as failed (the process died). */
-  staleSendingMs: 2 * 60_000,
+  /** A "sending" attempt with no result after this long counts as failed (the process died). Longer than any batch. */
+  staleSendingMs: 10 * 60_000,
   workerIntervalMs: 30_000,
   /** Alerts count as "failing" once an event has failed to deliver for this long. */
   failingAfterMs: 15 * 60_000,
@@ -52,7 +52,12 @@ export function itemStatus(
   const t = now.getTime();
   if (item.attempts.some((a) => a.status === 'sent'))
     return { status: 'sent', nextAt: null, failures: 0 };
-  const sorted = [...item.attempts].sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
+  // A time that cannot be read is treated as "now": it can only delay a retry, never throw or loop.
+  const when = (iso: string): number => {
+    const v = Date.parse(iso);
+    return Number.isFinite(v) ? v : t;
+  };
+  const sorted = [...item.attempts].sort((x, y) => when(x.at) - when(y.at));
   let failures = 0;
   let lastFailedMs: number | null = null;
   let retryAfter = 0;
@@ -61,24 +66,31 @@ export function itemStatus(
   const fail = (atMs: number, retryAfterS: number | null) => {
     failures += 1;
     lastFailedMs = atMs;
-    retryAfter = retryAfterS ? retryAfterS * 1000 : 0;
+    // never wait longer than the cap, whatever the channel asked for (a huge value must not push a retry past expiry)
+    retryAfter =
+      typeof retryAfterS === 'number' && Number.isFinite(retryAfterS) && retryAfterS > 0
+        ? Math.min(retryAfterS * 1000, NOTIFY_LIMITS.backoffCapMs)
+        : 0;
   };
   for (const a of sorted) {
     if (a.status === 'sending') {
-      if (open) fail(Date.parse(open.at), null); // a claim that never got a result
+      if (open) fail(when(open.at), null); // a claim that never got a result
       open = a;
     } else {
       open = null;
-      if (a.status === 'failed') fail(Date.parse(a.at), a.retryAfterS);
+      if (a.status === 'failed') fail(when(a.at), a.retryAfterS);
     }
   }
   let inFlight = false;
   if (open) {
-    if (t - Date.parse(open.at) >= NOTIFY_LIMITS.staleSendingMs) fail(Date.parse(open.at), null);
+    if (t - when(open.at) >= NOTIFY_LIMITS.staleSendingMs) fail(when(open.at), null);
     else inFlight = true;
   }
-  const age = t - Date.parse(item.event.occurredAt);
-  if (age > NOTIFY_LIMITS.maxAgeMs) return { status: 'expired', nextAt: null, failures };
+  const occurred = Date.parse(item.event.occurredAt);
+  // an event whose own time cannot be read can never be aged correctly: it is shown as expired, never sent
+  if (!Number.isFinite(occurred) || t - occurred > NOTIFY_LIMITS.maxAgeMs) {
+    return { status: 'expired', nextAt: null, failures };
+  }
   if (inFlight) return { status: 'in_flight', nextAt: null, failures };
   if (lastFailedMs === null) return { status: 'due', nextAt: null, failures: 0 };
   const nextMs = lastFailedMs + Math.max(backoffMs(failures), retryAfter);
@@ -91,6 +103,7 @@ export function itemStatus(
 
 export interface SentRecord {
   kind: NotificationEvent['kind'];
+  severity: NotificationEvent['severity'];
 }
 
 export interface BatchPlan {
@@ -110,7 +123,12 @@ export function planBatch(input: {
   sentLastHour: readonly SentRecord[];
   summarySentLastHour: boolean;
 }): BatchPlan {
-  let used = input.sentLastHour.filter((s) => !QUOTA_EXEMPT_KINDS.includes(s.kind)).length;
+  // Two counters: ALL counted messages (never above perHour + reserve) and the NON-critical ones
+  // (never above perHour). So critical events have a reserve of their own and cannot starve the rest.
+  const counted = input.sentLastHour.filter((x) => !QUOTA_EXEMPT_KINDS.includes(x.kind));
+  let total = counted.length;
+  let normal = counted.filter((x) => x.severity !== 'critical').length;
+  const totalCeiling = NOTIFY_LIMITS.perHour + NOTIFY_LIMITS.criticalReservePerHour;
   const sorted = [...input.due].sort((a, b) => {
     const ca = a.event.severity === 'critical' ? 0 : 1;
     const cb = b.event.severity === 'critical' ? 0 : 1;
@@ -126,9 +144,12 @@ export function planBatch(input: {
       continue;
     }
     const critical = item.event.severity === 'critical';
-    const ceiling = NOTIFY_LIMITS.perHour + (critical ? NOTIFY_LIMITS.criticalReservePerHour : 0);
-    if (used < ceiling) {
-      used += 1;
+    const allowed = critical
+      ? total < totalCeiling
+      : normal < NOTIFY_LIMITS.perHour && total < totalCeiling;
+    if (allowed) {
+      total += 1;
+      if (!critical) normal += 1;
       send.push(item);
     } else held.push(item);
   }
@@ -143,20 +164,51 @@ export { FILTER_EXEMPT_KINDS };
 
 export type AlertHealth = 'off' | 'ok' | 'failing';
 
-/** Shown in the header only when alerts are switched ON and not getting through. Never blocks. */
-export function alertHealth(input: {
+/** Why alerts may not be getting through. Short codes; the page explains each in words. */
+export type AlertProblem = 'channel' | 'delivery' | 'worker' | 'settings' | 'expired' | 'collector';
+
+/** How old the worker's last cycle may be before it counts as "not running" (3 cycles). */
+export const HEARTBEAT_MAX_AGE_MS = 3 * NOTIFY_LIMITS.workerIntervalMs;
+/** How far back unsent expired events still count as a problem. */
+export const EXPIRED_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface HealthInput {
   masterOn: boolean;
   channelReady: boolean;
-  /** Status of the latest attempts, newest first (at most 3 are looked at). */
+  /** Status of the latest delivery RESULTS (not claims), newest first (at most 3 are looked at). */
   recentStatuses: readonly DeliveryStatus[];
   /** How long the oldest event with a failed delivery has been waiting, or null. */
   oldestFailingAgeMs: number | null;
-}): AlertHealth {
-  if (!input.masterOn) return 'off';
-  if (!input.channelReady) return 'failing';
-  const recent = input.recentStatuses.slice(0, 3);
-  if (recent.length === 3 && recent.every((s) => s === 'failed')) return 'failing';
-  if (input.oldestFailingAgeMs !== null && input.oldestFailingAgeMs >= NOTIFY_LIMITS.failingAfterMs)
-    return 'failing';
-  return 'ok';
+  /** Age of the worker's last cycle, or null when it never ran since alerts were switched on. */
+  heartbeatAgeMs: number | null;
+  /** The stored settings could not be read (so nothing can be sent). */
+  settingsProblem: boolean;
+  /** Events of the last 7 days that expired without ever being sent. */
+  expiredUnsent: number;
+  /** The last cycle could not read part of its sources, or could not collect. */
+  collectorProblems: number;
+}
+
+export function alertProblems(i: HealthInput): AlertProblem[] {
+  if (!i.masterOn) return [];
+  const out: AlertProblem[] = [];
+  if (i.settingsProblem) out.push('settings');
+  if (!i.channelReady) out.push('channel');
+  const recent = i.recentStatuses.slice(0, 3);
+  if (
+    (recent.length === 3 && recent.every((s) => s === 'failed')) ||
+    (i.oldestFailingAgeMs !== null && i.oldestFailingAgeMs >= NOTIFY_LIMITS.failingAfterMs)
+  ) {
+    out.push('delivery');
+  }
+  if (i.heartbeatAgeMs === null || i.heartbeatAgeMs > HEARTBEAT_MAX_AGE_MS) out.push('worker');
+  if (i.expiredUnsent > 0) out.push('expired');
+  if (i.collectorProblems > 0) out.push('collector');
+  return out;
+}
+
+/** Shown in the header only when alerts are switched ON and not (fully) getting through. Never blocks. */
+export function alertHealth(i: HealthInput): AlertHealth {
+  if (!i.masterOn) return 'off';
+  return alertProblems(i).length > 0 ? 'failing' : 'ok';
 }

@@ -11,6 +11,9 @@ const io: NotifyIo = {
   print: (line = '') => console.log(line),
 };
 
+let cached: ReturnType<typeof openDatabase> | undefined;
+const db = () => (cached ??= openDatabase());
+
 async function main(): Promise<number> {
   try {
     loadEnvFile();
@@ -18,7 +21,7 @@ async function main(): Promise<number> {
       envPath: path.resolve(process.cwd(), '.env'),
       argv: process.argv.slice(2),
       makeSource: (token) => createTelegramPairingSource({ token }),
-      logChange: () => logChannelChange(openDatabase(), 'channel_paired'),
+      logChange: (detail) => logChannelChange(db(), detail),
     });
   } catch (error) {
     if (error instanceof NotATerminalError) {

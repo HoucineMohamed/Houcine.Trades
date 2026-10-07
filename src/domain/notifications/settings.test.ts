@@ -192,3 +192,82 @@ describe('passesSettings', () => {
     }
   });
 });
+
+describe('settings: more combinations', () => {
+  it('a matured severity change applies; several pending changes settle one by one', () => {
+    const r = requestSettingsChange(
+      active,
+      { categories: {} },
+      { categories: { risk: false, analyst: false }, minSeverity: 'critical' },
+      NOW,
+    );
+    const mid = settleSettings(active, r.pending, new Date(NOW.getTime() + QUIET_DELAY_MS));
+    expect(mid.settings.minSeverity).toBe('critical');
+    expect(mid.settings.categories).toMatchObject({ risk: false, analyst: false });
+    const partial = { ...r.pending, categories: { risk: r.pending.categories.risk } };
+    const two = settleSettings(active, partial, new Date(NOW.getTime() + QUIET_DELAY_MS - 1));
+    expect(two.stillPending.categories.risk).toBeDefined();
+  });
+  it('one request can apply, defer and cancel at once', () => {
+    const waiting = requestSettingsChange(
+      active,
+      { categories: {} },
+      { categories: { risk: false } },
+      NOW,
+    );
+    const lowered: NotificationSettings = { ...active, minSeverity: 'critical' };
+    const r = requestSettingsChange(
+      lowered,
+      waiting.pending,
+      { categories: { risk: true, security: false }, minSeverity: 'warning' },
+      NOW,
+    );
+    expect(r.applied).toEqual(['minimum severity warning']);
+    expect(r.deferred.map((d) => d.what)).toEqual(['category security off']);
+    expect(r.cancelled).toEqual(['category risk']);
+  });
+  it('a request with one bad key changes nothing (it throws as a whole)', () => {
+    const copy = structuredClone(active);
+    expect(() =>
+      requestSettingsChange(
+        active,
+        { categories: {} },
+        { categories: { risk: false, bogus: true } as never },
+        NOW,
+      ),
+    ).toThrow();
+    expect(active).toEqual(copy);
+  });
+  it('a different quieter severity replaces the waiting one and restarts the timer', () => {
+    const first = requestSettingsChange(
+      active,
+      { categories: {} },
+      { minSeverity: 'critical' },
+      NOW,
+    );
+    const later = new Date(NOW.getTime() + 3_600_000);
+    const second = requestSettingsChange(active, first.pending, { minSeverity: 'warning' }, later);
+    expect(second.pending.minSeverity).toMatchObject({
+      value: 'warning',
+      effectiveAt: new Date(later.getTime() + QUIET_DELAY_MS).toISOString(),
+    });
+  });
+  it('lowering by two ranks applies now; an event exactly at the minimum passes', () => {
+    const high: NotificationSettings = { ...active, minSeverity: 'critical' };
+    expect(
+      requestSettingsChange(high, { categories: {} }, { minSeverity: 'info' }, NOW).active
+        .minSeverity,
+    ).toBe('info');
+    const warn: NotificationSettings = { ...active, minSeverity: 'warning' };
+    expect(passesSettings(ev('password_changed'), warn)).toBe(true);
+    expect(passesSettings(ev('login_success'), warn)).toBe(false);
+  });
+  it('parsePending rejects missing, extra and unknown keys', () => {
+    for (const bad of [
+      '{"categories":{"risk":{"value":false,"effectiveAt":"2026-01-01T00:00:00.000Z"}}}',
+      '{"categories":{"risk":{"value":false,"requestedAt":"a","effectiveAt":"2026-01-01T00:00:00.000Z","x":1}}}',
+      '{"categories":{"bogus":{"value":false,"requestedAt":"a","effectiveAt":"2026-01-01T00:00:00.000Z"}}}',
+    ])
+      expect(parsePending(bad).ok).toBe(false);
+  });
+});

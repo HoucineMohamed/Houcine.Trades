@@ -46,17 +46,18 @@ const FIXED: Partial<Record<EventKind, (acct: string, count: number) => string>>
   market_data_stale: () => 'Market data is out of date.',
 };
 
-const int = (v: number | null, fallback = 0): number =>
-  v !== null && Number.isInteger(v) && v >= 0 && v <= 1_000_000 ? v : fallback;
+const MAX_SHOWN = 1_000_000;
+const int = (v: unknown, fallback = 0): number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= MAX_SHOWN ? v : fallback;
+const own = (o: object, k: string): boolean => Object.hasOwn(o, k);
 
 export function messageFor(
   e: Pick<NotificationEvent, 'kind' | 'level' | 'count' | 'accountId'>,
 ): string {
-  const acct =
-    e.accountId !== null && Number.isInteger(e.accountId) && e.accountId > 0
-      ? ` (account #${e.accountId})`
-      : '';
-  if (e.kind in USAGE_LABELS) {
+  const id = int(e.accountId);
+  const acct = id > 0 ? ` (account #${id})` : '';
+  // Own keys only: a kind such as "toString" or "constructor" must never reach the text.
+  if (own(USAGE_LABELS, e.kind)) {
     const label = USAGE_LABELS[e.kind as UsageKind];
     const isAnalyst = e.kind.startsWith('analyst_');
     const where = isAnalyst ? '' : acct;
@@ -64,6 +65,6 @@ export function messageFor(
     const level = e.level === 50 || e.level === 80 ? e.level : 0;
     return `${PREFIX}${label}: ${level} % of the limit is used${where}.`;
   }
-  const template = FIXED[e.kind];
+  const template = own(FIXED, e.kind) ? FIXED[e.kind] : undefined;
   return template ? PREFIX + template(acct, int(e.count)) : `${PREFIX}An event happened.`;
 }

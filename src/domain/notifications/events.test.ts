@@ -170,7 +170,7 @@ describe('failed-login bursts', () => {
     const e = loginBurstEvents([t(1), t(2), t(3), t(14, 59)]);
     expect(e).toHaveLength(1);
     expect(e[0]).toMatchObject({ kind: 'login_failures_burst', count: 4, severity: 'warning' });
-    expect(e[0]?.dedupeKey).toBe('login_burst:2026-03-10T10:00:00.000Z');
+    expect(e[0]?.dedupeKey).toBe('login_burst:2026-03-10T10:00:00.000Z:3');
   });
   it('failures spread over two windows are counted per window (the boundary is exact)', () => {
     expect(loginBurstEvents([t(13), t(14), t(15), t(16)])).toEqual([]);
@@ -219,5 +219,111 @@ describe('makeEvent', () => {
       level: 80,
       count: null,
     });
+  });
+});
+
+describe('the full table of kinds (category and severity are pinned)', () => {
+  const table: Record<string, [string, string | string[]]> = {
+    daily_loss_usage: ['risk', ['info', 'warning', 'critical']],
+    open_risk_usage: ['risk', ['info', 'warning', 'critical']],
+    open_trades_usage: ['risk', ['info', 'warning', 'critical']],
+    drawdown_usage: ['risk', ['info', 'warning', 'critical']],
+    halt_started_daily_loss: ['risk', 'critical'],
+    halt_started_drawdown: ['risk', 'critical'],
+    halt_started_manual: ['risk', 'warning'],
+    halt_cleared: ['risk', 'info'],
+    drawdown_reset_refused: ['risk', 'warning'],
+    override_logged: ['risk', 'warning'],
+    rule_violation_trade_logged: ['risk', 'warning'],
+    login_failures_burst: ['security', 'warning'],
+    login_throttled: ['security', 'warning'],
+    login_success: ['security', 'info'],
+    recovery_code_used: ['security', 'critical'],
+    password_changed: ['security', 'warning'],
+    security_settings_changed: ['security', 'warning'],
+    logout_everywhere: ['security', 'warning'],
+    step_up_failed: ['security', 'warning'],
+    analyst_daily_calls_usage: ['analyst', ['info', 'warning', 'warning']],
+    analyst_monthly_calls_usage: ['analyst', ['info', 'warning', 'warning']],
+    analyst_monthly_cost_usage: ['analyst', ['info', 'warning', 'warning']],
+    analyst_call_failed: ['analyst', 'info'],
+    notifications_switched_off: ['system', 'critical'],
+    test_message: ['system', 'info'],
+    flood_summary: ['system', 'info'],
+    backup_failed: ['system', 'warning'],
+    market_data_stale: ['system', 'warning'],
+  };
+  it('lists exactly the defined kinds', () => {
+    expect(Object.keys(table).sort()).toEqual([...EVENT_KINDS].sort());
+  });
+  it.each(Object.entries(table))('%s', (kind, [category, severity]) => {
+    expect(KIND_CATEGORY[kind as keyof typeof KIND_CATEGORY]).toBe(category);
+    if (Array.isArray(severity)) {
+      expect([50, 80, 100].map((l) => severityOf(kind as never, l))).toEqual(severity);
+    } else {
+      expect(severityOf(kind as never, null)).toBe(severity);
+      expect(severityOf(kind as never, 100)).toBe(severity);
+    }
+  });
+  it('an unknown or inherited kind is never louder than info', () => {
+    for (const k of ['toString', 'constructor', '__proto__', 'nope'])
+      expect(severityOf(k as never, 100)).toBe('info');
+  });
+});
+
+describe('failed-login bursts: tiers and window edges', () => {
+  const t = (m: number, s = 0, ms = 0) =>
+    new Date(Date.UTC(2026, 2, 10, 10, m, s, ms)).toISOString();
+  const many = (n: number, at = t(1)) => Array.from({ length: n }, () => at);
+  it('the dedupe key carries the tier, so 500 failures are not stuck at "3"', () => {
+    const key = (n: number) => loginBurstEvents(many(n))[0]?.dedupeKey.split(':').pop();
+    expect([key(3), key(9), key(10), key(29), key(30), key(99), key(100), key(500)]).toEqual([
+      '3',
+      '3',
+      '10',
+      '10',
+      '30',
+      '30',
+      '100',
+      '100',
+    ]);
+    expect(loginBurstEvents(many(40))[0]?.count).toBe(40);
+  });
+  it('the same window announced again only when a higher tier is reached', () => {
+    const a = loginBurstEvents(many(3))[0]?.dedupeKey;
+    expect(loginBurstEvents(many(9))[0]?.dedupeKey).toBe(a);
+    expect(loginBurstEvents(many(10))[0]?.dedupeKey).not.toBe(a);
+  });
+  it('window edges are exact: :00.000 starts one, :14:59.999 ends it, :15:00.000 starts the next', () => {
+    const e = loginBurstEvents([t(0, 0, 0), t(7), t(14, 59, 999), t(15, 0, 0), t(20), t(25)]);
+    expect(e.map((x) => [x.occurredAt, x.count])).toEqual([
+      [t(0), 3],
+      [t(15), 3],
+    ]);
+  });
+  it('rolls over midnight and a year end, is independent of the time zone, and sorts by window', () => {
+    const e = loginBurstEvents([
+      '2026-12-31T23:59:59.999Z',
+      '2026-12-31T23:50:00.000Z',
+      '2026-12-31T23:45:00.000Z',
+      '2027-01-01T00:00:00.000Z',
+      '2027-01-01T00:01:00.000Z',
+      '2027-01-01T00:02:00.000Z',
+    ]);
+    expect(e.map((x) => x.occurredAt)).toEqual([
+      '2026-12-31T23:45:00.000Z',
+      '2027-01-01T00:00:00.000Z',
+    ]);
+  });
+});
+
+describe('halt_cleared events', () => {
+  const at = new Date('2026-03-11T00:00:00.000Z');
+  it('two halts that end together give two events with different keys; nothing for an empty or unchanged list', () => {
+    const e = haltClearedEvents(2, ['daily_loss', 'manual'], [], at);
+    expect(e).toHaveLength(2);
+    expect(new Set(e.map((x) => x.dedupeKey)).size).toBe(2);
+    expect(haltClearedEvents(2, [], ['manual'], at)).toEqual([]);
+    expect(haltClearedEvents(2, ['manual'], ['manual'], at)).toEqual([]);
   });
 });

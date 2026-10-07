@@ -2,17 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { listAuthEvents } from '@/data/auth';
 import {
   claimDue,
+  countExpiredUnsent,
   currentMaxIds,
+  findEventByKey,
   getHealthInput,
   getNotificationSettings,
   insertEvents,
   listRecentEvents,
+  loadHealth,
   loadOutbox,
   logChannelChange,
   readAllState,
   recordAttempt,
   setNotificationsMaster,
   updateNotificationSettings,
+  writeHeartbeat,
 } from '@/data/notifications';
 import { StepUpRequiredError } from '@/domain/auth/stepup';
 import { ValidationError } from '@/domain/errors';
@@ -61,7 +65,11 @@ describe('the master switch', () => {
     const v = getNotificationSettings(db, NOW);
     expect(v.master).toBe(true);
     expect(v.consentAt).toBe(NOW.toISOString());
-    expect(readAllState(db)).toEqual({ 'wm:risk': '5' });
+    expect(readAllState(db)).toMatchObject({
+      'wm:risk': '5',
+      'hb:cycle': NOW.toISOString(),
+      'baseline:at': NOW.toISOString(),
+    });
     expect(kinds(db)).toEqual(['notifications_on']);
   });
 
@@ -326,5 +334,103 @@ describe('display and health', () => {
   });
   it('currentMaxIds is zero on an empty database', () => {
     expect(currentMaxIds(memoryDb())).toEqual({ risk: 0, verdict: 0, auth: 0, usage: 0 });
+  });
+});
+
+describe('switching ON when already ON changes nothing (no events are skipped)', () => {
+  it('keeps the watermarks, the consent time and the log', () => {
+    const db = dbWithSession();
+    setNotificationsMaster(db, true, fresh(), NOW, {}, { 'wm:risk': '5' });
+    const before = JSON.stringify([
+      readAllState(db),
+      getNotificationSettings(db, NOW).consentAt,
+      listAuthEvents(db).length,
+    ]);
+    setNotificationsMaster(db, true, fresh(ms(60_000)), ms(60_000), {}, { 'wm:risk': '999' });
+    expect(
+      JSON.stringify([
+        readAllState(db),
+        getNotificationSettings(db, NOW).consentAt,
+        listAuthEvents(db).length,
+      ]),
+    ).toBe(before);
+  });
+});
+
+describe('health', () => {
+  const enable = (db: ReturnType<typeof memoryDb>) =>
+    setNotificationsMaster(db, true, fresh(), NOW);
+  it('the latest RESULTS are looked at, not the claim rows (so three failed deliveries in a row show)', () => {
+    const db = dbWithSession();
+    insertEvents(db, [ev(1)], NOW);
+    for (let i = 0; i < 3; i++) {
+      recordAttempt(db, { eventId: 1, channel: 'fake', status: 'sending', at: ms(i * 10) });
+      recordAttempt(db, {
+        eventId: 1,
+        channel: 'fake',
+        status: 'failed',
+        at: ms(i * 10 + 1),
+        errorCode: 'network',
+      });
+    }
+    expect(getHealthInput(db, ms(1000)).recentStatuses).toEqual(['failed', 'failed', 'failed']);
+  });
+  it('loadHealth reports the heartbeat, settings problems and expired-unsent events', () => {
+    const db = dbWithSession();
+    enable(db);
+    const h = loadHealth(db, ms(30_000), true);
+    expect(h?.input).toMatchObject({
+      masterOn: true,
+      channelReady: true,
+      heartbeatAgeMs: 30_000,
+      settingsProblem: false,
+      expiredUnsent: 0,
+      collectorProblems: 0,
+    });
+    writeHeartbeat(db, ms(40_000), ['analyst_settings']);
+    expect(loadHealth(db, ms(50_000), true)?.input).toMatchObject({
+      heartbeatAgeMs: 10_000,
+      collectorProblems: 1,
+    });
+    db.$client.prepare("UPDATE notification_settings SET categories_json = 'junk'").run();
+    expect(loadHealth(db, ms(50_000), true)?.input.settingsProblem).toBe(true);
+  });
+  it('an event that expired without being sent is counted for 7 days, then forgotten; a sent one is not', () => {
+    const db = dbWithSession();
+    enable(db);
+    const day = 24 * 3600_000;
+    insertEvents(
+      db,
+      [
+        ev(1, 'login_success', -2 * day),
+        ev(2, 'login_success', -3 * day),
+        ev(3, 'login_success', -8 * day),
+        ev(4, 'login_success', -1000),
+      ],
+      NOW,
+    );
+    recordAttempt(db, { eventId: 2, channel: 'fake', status: 'sent', at: ms(-2 * day) });
+    expect(loadHealth(db, NOW, true)?.input.expiredUnsent).toBe(1); // event 1 only
+    expect(countExpiredUnsent(db, NOW, () => false)).toBe(0); // switched off by the settings: not a failure
+  });
+  it('loadHealth never throws: a broken database gives null (the caller shows "status unknown")', () => {
+    const db = dbWithSession();
+    enable(db);
+    db.$client.exec('DROP TABLE notification_deliveries; DROP TABLE notification_state');
+    expect(loadHealth(db, NOW, true)).toBeNull();
+  });
+  it('the heartbeat is written at switch-on (a grace period) and by every cycle', () => {
+    const db = dbWithSession();
+    enable(db);
+    expect(readAllState(db)['hb:cycle']).toBe(NOW.toISOString());
+    writeHeartbeat(db, ms(5000), []);
+    expect(readAllState(db)['hb:cycle']).toBe(ms(5000).toISOString());
+    expect(readAllState(db)['last:problems']).toBe('[]');
+  });
+  it('findEventByKey finds exactly one event', () => {
+    const db = memoryDb();
+    insertEvents(db, [ev(1), ev(2)], NOW);
+    expect(findEventByKey(db, 'k2')?.id).toBe(2);
+    expect(findEventByKey(db, 'nope')).toBeUndefined();
   });
 });

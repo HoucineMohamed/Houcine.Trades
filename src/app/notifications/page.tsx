@@ -1,6 +1,6 @@
-import { getHealthInput, getNotificationSettings, listRecentEvents } from '@/data/notifications';
+import { getNotificationSettings, listRecentEvents, loadHealth } from '@/data/notifications';
 import {
-  alertHealth,
+  alertProblems,
   messageFor,
   NOTIFICATION_CATEGORIES,
   NOTIFY_LIMITS,
@@ -32,6 +32,19 @@ const CATEGORY_LABEL: Record<NotificationCategory, string> = {
   system: 'System (backups, market data: not used yet)',
 };
 
+const PROBLEM_WORDS: Record<string, string> = {
+  channel: 'Telegram is not set up, so nothing can be sent.',
+  delivery:
+    'Messages are failing to reach Telegram. The events stay in the outbox and are retried.',
+  worker:
+    'The worker is not running (it has not run in the last 90 seconds), so new events are not being collected. Start it with npm run notify:worker, or press Deliver now.',
+  settings: 'The stored alert settings could not be read, so nothing is sent.',
+  expired:
+    'Some events expired without ever being sent (see the list below). They are recorded, but they never reached your phone.',
+  collector:
+    'Part of the app state could not be read in the last cycle, so some events may be missing.',
+};
+
 const STATUS_WORDS = {
   sent: 'sent',
   due: 'waiting to be sent',
@@ -48,11 +61,8 @@ export default guardedPage(
     const settings = getNotificationSettings(ctx.db, now);
     const runtime = getChannelRuntime();
     const effective = settings.effective;
-    const health = alertHealth({
-      masterOn: settings.master,
-      channelReady: runtime.configured,
-      ...getHealthInput(ctx.db, now),
-    });
+    const healthData = loadHealth(ctx.db, now, runtime.configured);
+    const problems = healthData ? alertProblems(healthData.input) : [];
     const events = listRecentEvents(ctx.db, now, 50, (e) =>
       effective ? passesSettings(e, effective) : false,
     );
@@ -95,11 +105,22 @@ export default guardedPage(
                 <> since {formatLocal(settings.consentAt)} (local time)</>
               )}
             </li>
-            {health === 'failing' && (
-              <li role="alert">
-                Alerts are on but not getting through. The events stay in the outbox and are
-                retried.
+            {settings.master && healthData === null && (
+              <li role="alert">The health of the alerts could not be read (status unknown).</li>
+            )}
+            {problems.map((p) => (
+              <li role="alert" key={p}>
+                {PROBLEM_WORDS[p]}
               </li>
+            ))}
+            {healthData && settings.master && healthData.input.heartbeatAgeMs !== null && (
+              <li>
+                The worker last ran {Math.round(healthData.input.heartbeatAgeMs / 1000)} seconds
+                ago.
+              </li>
+            )}
+            {healthData && healthData.problems.length > 0 && (
+              <li>Last cycle, could not read or do: {healthData.problems.join(', ')}.</li>
             )}
             {settings.problem && (
               <li role="alert">
@@ -171,16 +192,27 @@ export default guardedPage(
                         type="checkbox"
                         name={`cat_${c}`}
                         value="on"
-                        defaultChecked={effective.categories[c]}
+                        defaultChecked={
+                          settings.pending.categories[c]
+                            ? settings.pending.categories[c]?.value
+                            : effective.categories[c]
+                        }
                       />{' '}
                       {CATEGORY_LABEL[c]}
+                      {settings.pending.categories[c] && (
+                        <> (switching off at {settings.pending.categories[c]?.effectiveAt} UTC)</>
+                      )}
                     </label>
                   </p>
                 ))}
               </fieldset>
               <div className="field">
                 <label htmlFor="f-minSeverity">Minimum severity</label>
-                <select id="f-minSeverity" name="minSeverity" defaultValue={effective.minSeverity}>
+                <select
+                  id="f-minSeverity"
+                  name="minSeverity"
+                  defaultValue={settings.pending.minSeverity?.value ?? effective.minSeverity}
+                >
                   {SEVERITIES.map((s) => (
                     <option key={s} value={s}>
                       {s}

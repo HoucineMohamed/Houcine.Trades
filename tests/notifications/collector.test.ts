@@ -7,6 +7,7 @@ import { recordUsage } from '@/data/analyst';
 import { createTrade } from '@/data/trades';
 import { collectEvents, collectorBaseline } from '@/notifications/collector';
 import { freshAuthForTests } from '../helpers/auth';
+import { setNotificationsMaster } from '@/data/notifications';
 import { enableAlerts } from '../helpers/notifications';
 import { closedTrade, riskDb } from '../helpers/risk';
 
@@ -371,5 +372,88 @@ describe('robustness and boundaries', () => {
       .run();
     expect(() => collectEvents(db, ms(1000))).not.toThrow();
     expect(insertEvents(db, [], NOW)).toBe(0);
+  });
+});
+
+describe('switching off and on again never drops a usage alert (the epoch carries over)', () => {
+  it('an 80 % that was announced, then OFF, then ON with usage back below, then 80 % again, is announced again', () => {
+    const db = riskDb();
+    enableAlerts(db, NOW);
+    open(db);
+    open(db);
+    open(db); // 3 of 3 -> level 100 announced
+    collectEvents(db, ms(1000));
+    expect(kinds(db, ms(2000)).filter((x) => x.startsWith('open_trades'))).toEqual([
+      'open_trades_usage:100',
+    ]);
+    // OFF, then everything closes, then ON again with a fresh baseline
+    setNotificationsMaster(db, false, freshAuthForTests(1, ms(3000)), ms(3000));
+    db.$client.prepare("UPDATE trades SET status = 'cancelled'").run();
+    setNotificationsMaster(
+      db,
+      true,
+      freshAuthForTests(1, ms(4000)),
+      ms(4000),
+      {},
+      collectorBaseline(db, ms(4000)).state,
+    );
+    open(db);
+    open(db);
+    open(db); // 100 % again, no fall seen by the collector in between
+    collectEvents(db, ms(3_700_000)); // past the one-hour cooldown
+    expect(kinds(db, ms(3_800_000)).filter((x) => x.startsWith('open_trades'))).toEqual([
+      'open_trades_usage:100',
+      'open_trades_usage:100',
+    ]);
+  });
+  it('the baseline carries the epoch forward and is refused when part of the state cannot be read', () => {
+    const db = riskDb();
+    const a = collectorBaseline(db, NOW);
+    expect(a.problems).toEqual([]);
+    const key = Object.keys(a.state).find((k) => k.startsWith('limit:daily_loss_usage'));
+    expect(JSON.parse(a.state[key as string] as string).epoch).toBe(0);
+    enableAlerts(db, NOW);
+    const b = collectorBaseline(db, ms(1000));
+    expect(JSON.parse(b.state[key as string] as string).epoch).toBe(1);
+    db.$client.exec('ALTER TABLE ai_usage RENAME TO ai_usage_gone');
+    expect(collectorBaseline(db, ms(2000)).problems).toEqual(['logs_unreadable', 'analyst_usage']);
+  });
+});
+
+describe('problems are named, never silent', () => {
+  it('an unreadable analyst setting and an unverifiable account are reported with their own codes', () => {
+    const db = riskDb();
+    enableAlerts(db, NOW);
+    db.$client.prepare("UPDATE ai_settings SET caps_json = 'junk'").run();
+    db.$client.exec(
+      "INSERT OR REPLACE INTO ai_settings (id, consent, caps_json, updated_at) VALUES (1, 0, 'junk', 't')",
+    );
+    expect(collectEvents(db, ms(1000)).problems).toContain('analyst_settings');
+  });
+});
+
+describe('failed-login bursts only count what happened after alerts were switched on', () => {
+  it('failures from before switch-on are not announced; later ones are, with the real count', () => {
+    const db = riskDb();
+    for (let i = 0; i < 5; i++)
+      appendAuthEvent(db, { kind: 'login_failure', now: ms(-60_000 + i) });
+    enableAlerts(db, NOW);
+    collectEvents(db, ms(1000));
+    expect(kinds(db, ms(2000))).toEqual([]);
+    for (let i = 0; i < 12; i++) appendAuthEvent(db, { kind: 'login_failure', now: ms(2000 + i) });
+    collectEvents(db, ms(5000));
+    const rows = listRecentEvents(db, ms(6000), 10);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.event.count).toBe(12);
+    appendAuthEvent(db, { kind: 'login_failure', now: ms(5500) });
+    collectEvents(db, ms(7000)); // same tier: nothing new
+    expect(listRecentEvents(db, ms(8000), 10)).toHaveLength(1);
+  });
+  it('a burst is still found after a long worker outage (up to 24 hours back)', () => {
+    const db = riskDb();
+    enableAlerts(db, NOW);
+    for (let i = 0; i < 4; i++) appendAuthEvent(db, { kind: 'login_failure', now: ms(10_000 + i) });
+    collectEvents(db, ms(3 * 3600_000));
+    expect(kinds(db, ms(3 * 3600_000))).toEqual(['login_failures_burst']);
   });
 });

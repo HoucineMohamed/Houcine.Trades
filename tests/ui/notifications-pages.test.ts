@@ -5,9 +5,9 @@ import { getAuthEnv, resetAuthEnvCache } from '@/auth/env';
 import { login } from '@/auth/service';
 import { createAccount } from '@/data/accounts';
 import type { Db } from '@/data/client';
-import { insertEvents, recordAttempt } from '@/data/notifications';
+import { insertEvents, recordAttempt, updateNotificationSettings } from '@/data/notifications';
 import { makeEvent } from '@/domain/notifications';
-import { CLIENT, codeAt, dbWithOwner, PASSWORD } from '../helpers/auth';
+import { CLIENT, codeAt, dbWithOwner, freshAuthForTests, PASSWORD } from '../helpers/auth';
 import { unsafeThings } from '../helpers/html';
 import { enableAlerts, fakeBotToken, fakeChatId } from '../helpers/notifications';
 
@@ -209,5 +209,57 @@ describe('the Alerts page', () => {
     expect(textOf(html)).toContain('Alerts: not getting through');
     expect(unsafeThings(html)).toEqual([]);
     expect(html).not.toContain(token);
+  });
+});
+
+describe('the page and the header say what is wrong, in words', () => {
+  const lateEnable = (db: Db, ageMs: number) => enableAlerts(db, new Date(Date.now() - ageMs));
+  it('"worker not running" when alerts are ON and no cycle has run for 90 seconds', async () => {
+    lateEnable(request.db as Db, 10 * 60_000);
+    const html = await render(PAGE);
+    expect(textOf(html)).toContain('The worker is not running');
+    expect(textOf(html)).toContain('Alerts: not getting through'); // the header
+  });
+  it('is quiet when a cycle ran a moment ago', async () => {
+    enableAlerts(request.db as Db, new Date());
+    const html = await render(PAGE);
+    expect(textOf(html)).not.toContain('Alerts: not getting through');
+    expect(textOf(html)).not.toContain('The worker is not running');
+    expect(textOf(html)).toMatch(/The worker last ran \d+ seconds ago/);
+  });
+  it('lists events that expired without being sent, and says they never reached the phone', async () => {
+    const db = request.db as Db;
+    enableAlerts(db, new Date());
+    const old = new Date(Date.now() - 3 * 24 * 3600_000).toISOString();
+    insertEvents(
+      db,
+      [makeEvent({ kind: 'login_success', dedupeKey: 'old', occurredAt: old })],
+      new Date(),
+    );
+    const text = textOf(await render(PAGE));
+    expect(text).toContain('expired without ever being sent');
+    expect(text).toContain('expired (older than 24 hours, never sent)');
+  });
+  it('says "status unknown" (not nothing) when the health cannot be read', async () => {
+    const db = request.db as Db;
+    enableAlerts(db, new Date());
+    db.$client.exec('DROP TABLE notification_deliveries');
+    const html = await render(PAGE).catch(() => '');
+    // the page itself may fail to list events; the header of ANY page must not hide it
+    const shellHtml = await render('src/app/security/page.tsx');
+    expect(textOf(shellHtml)).toContain('Alerts: status unknown');
+    expect(html).not.toContain(token);
+  });
+  it('shows a pending quieter change in the form (the box shows the waiting value)', async () => {
+    const db = request.db as Db;
+    updateNotificationSettings(
+      db,
+      { categories: { analyst: false } },
+      freshAuthForTests(1, new Date()),
+      new Date(),
+    );
+    const html = await render(PAGE);
+    expect(textOf(html)).toContain('switching off at');
+    expect(html).toMatch(/name="cat_analyst"[^>]*value="on"(?![^>]*checked)/);
   });
 });

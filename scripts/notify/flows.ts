@@ -25,8 +25,8 @@ export interface SetTelegramOptions {
   envPath: string;
   argv: string[];
   makeSource: (token: string) => PairingSource;
-  /** Records "channel paired" in the authentication log (best effort, never needed for pairing). */
-  logChange?: () => void;
+  /** Records a channel change in the authentication log (best effort, never needed for pairing). */
+  logChange?: (detail: 'channel_token_changed' | 'channel_paired') => void;
   /** Tests: the one-time code, the clock, the pause. */
   makeCode?: () => string;
   now?: () => number;
@@ -37,7 +37,7 @@ export interface SetTelegramOptions {
 }
 
 const MAX_ATTEMPTS = 3;
-const ENV_LINE = (key: string) => new RegExp(`^\\s*${key}\\s*=`);
+const ENV_LINE = (key: string) => new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=`);
 
 /** Replaces, appends or (with null) removes one KEY=value line; every other line is untouched. */
 export function withEnvValue(existing: string | null, key: string, value: string | null): string {
@@ -127,8 +127,20 @@ export async function setTelegramFlow(io: NotifyIo, o: SetTelegramOptions): Prom
     return 1;
   }
   // The token is saved; an older chat id belongs to the old setup, so it is removed until pairing succeeds.
+  const hadChat = (fs.existsSync(o.envPath) ? fs.readFileSync(o.envPath, 'utf8') : '')
+    .split(/\r?\n/)
+    .some((l) => ENV_LINE('TELEGRAM_CHAT_ID').test(l));
   updateEnv(o.envPath, { TELEGRAM_BOT_TOKEN: token, TELEGRAM_CHAT_ID: null });
   io.print(`Token saved. It ends in ...${token.slice(-4)}.`);
+  if (hadChat)
+    io.print(
+      'The previously paired chat was removed: alerts cannot be sent until pairing finishes.',
+    );
+  try {
+    o.logChange?.('channel_token_changed'); // logged when it happens, even if pairing does not finish
+  } catch {
+    io.print('(The change could not be written to the sign-in log. Alerts are not affected.)');
+  }
 
   // ---- 2. pairing ------------------------------------------------------------------------------
   const source = o.makeSource(token);
@@ -203,7 +215,7 @@ export async function setTelegramFlow(io: NotifyIo, o: SetTelegramOptions): Prom
   }
   updateEnv(o.envPath, { TELEGRAM_CHAT_ID: parsed.data });
   try {
-    o.logChange?.();
+    o.logChange?.('channel_paired');
   } catch {
     io.print('(The change could not be written to the sign-in log. Alerts are not affected.)');
   }

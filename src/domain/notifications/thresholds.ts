@@ -16,12 +16,13 @@ export const utcDayKey = (now: Date): string => now.toISOString().slice(0, 10);
 export const utcMonthKey = (now: Date): string => now.toISOString().slice(0, 7);
 
 /**
- * The level reached, from the engine's own figures. `null` means "cannot be verified": nothing is
+ * The level reached, from the engine's own figures. Only `reached === true` (the engine's exact
+ * comparison) gives 100: a rounded-up share of 100 that is not confirmed as reached counts as 80. `null` means "cannot be verified": nothing is
  * announced and the state is left alone (fail closed: never guessed).
  */
 export function levelFromShare(share: string | null, reached: boolean | null): Level | null {
   if (reached === true) return 100;
-  if (share === null || !isDecimalString(share)) return reached === false ? 0 : null;
+  if (share === null || !isDecimalString(share)) return null; // cannot be read: unknown, never "fine"
   if (compareDecimal(share, '80') >= 0) return 80;
   if (compareDecimal(share, '50') >= 0) return 50;
   return 0;

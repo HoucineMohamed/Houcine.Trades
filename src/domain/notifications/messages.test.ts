@@ -170,14 +170,47 @@ describe('what a message can never contain', () => {
       messageFor({ kind: 'daily_loss_usage', level: 77 as never, count: null, accountId: 1 }),
     ).toContain('0 % of the limit');
   });
-  it('the message function takes no free-text field at all', () => {
-    // the parameter type has only kind, level, count and an account number
-    const keys: (keyof Parameters<typeof messageFor>[0])[] = [
-      'kind',
-      'level',
-      'count',
-      'accountId',
-    ];
-    expect(keys).toHaveLength(4);
+});
+
+describe('inherited and hostile values never reach a message', () => {
+  const generic = 'Houcine.Trades (paper): An event happened.';
+  it.each([
+    'toString',
+    'constructor',
+    '__proto__',
+    'hasOwnProperty',
+    'valueOf',
+    'isPrototypeOf',
+    'x',
+    '',
+  ])('an unknown or inherited kind "%s" gives the generic sentence', (kind) => {
+    expect(messageFor({ kind: kind as never, level: 50, count: 3, accountId: 1 })).toBe(generic);
+  });
+  it.each([0, -1, 1.5, Number.NaN, Infinity, 1e21, 2 ** 53, '7', '7; <script>', true, {}, null])(
+    'an account id of %j adds no account text',
+    (id) => {
+      expect(
+        messageFor({ kind: 'halt_cleared', level: null, count: null, accountId: id as never }),
+      ).toBe('Houcine.Trades (paper): A trading halt ended.');
+    },
+  );
+  it('account ids and counts are shown only up to 1,000,000', () => {
+    const acct = (id: number) =>
+      messageFor({ kind: 'halt_cleared', level: null, count: null, accountId: id });
+    expect(acct(999_999)).toContain('#999999');
+    expect(acct(1_000_000)).toContain('#1000000');
+    expect(acct(1_000_001)).not.toContain('#');
+    const count = (n: unknown) =>
+      messageFor({ kind: 'login_failures_burst', level: null, count: n as never, accountId: null });
+    expect(count(1_000_000)).toContain('1000000 failed');
+    expect(count(1_000_001)).toContain('0 failed');
+    expect(count('5; DROP')).toContain('0 failed');
+  });
+  it('a level that is not 50, 80 or 100 is shown as 0, and 100 as "reached"', () => {
+    const lv = (l: unknown) =>
+      messageFor({ kind: 'open_risk_usage', level: l as never, count: null, accountId: 1 });
+    expect(lv(77)).toContain(': 0 % of the limit');
+    expect(lv('80')).toContain(': 0 % of the limit');
+    expect(lv(100)).toContain('reached (100 % of the limit)');
   });
 });

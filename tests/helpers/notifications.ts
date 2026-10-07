@@ -98,5 +98,12 @@ export function enableAlerts(db: Db, now: Date): void {
       "INSERT OR IGNORE INTO sessions (id, token_hash, created_at, last_seen_at) VALUES (1, 'test-hash', ?, ?)",
     )
     .run(now.toISOString(), now.toISOString());
-  setNotificationsMaster(db, true, freshAuthForTests(1, now), now, {}, collectorBaseline(db, now));
+  setNotificationsMaster(
+    db,
+    true,
+    freshAuthForTests(1, now),
+    now,
+    {},
+    collectorBaseline(db, now).state,
+  );
 }

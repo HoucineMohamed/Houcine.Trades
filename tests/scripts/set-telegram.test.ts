@@ -67,7 +67,7 @@ function run(
       return r;
     },
   };
-  let logged = 0;
+  const logged: string[] = [];
   const done = setTelegramFlow(t.io, {
     envPath,
     argv: o.argv ?? [],
@@ -76,7 +76,7 @@ function run(
     now: c.now,
     totalMs: o.totalMs ?? 60_000,
     pollSec: 20,
-    logChange: () => void (logged += 1),
+    logChange: (detail: string) => void logged.push(detail),
   });
   return { token, t, source, done, logged: () => logged };
 }
@@ -141,6 +141,19 @@ describe('npm run notify:set-telegram: the token', () => {
     expect(text).not.toContain('=old');
     expect(text).not.toContain('TELEGRAM_CHAT_ID');
   });
+  it('replaces a line written as "export KEY=..." too (no stale copy stays behind)', () => {
+    expect(withEnvValue('export TELEGRAM_BOT_TOKEN=old\nB=2\n', 'TELEGRAM_BOT_TOKEN', 'new')).toBe(
+      'TELEGRAM_BOT_TOKEN=new\nB=2\n',
+    );
+    expect(withEnvValue('  export  X = 1\n', 'X', null)).toBe('');
+  });
+  it('says so when a previously paired chat was removed, and logs the token change at once', async () => {
+    fs.writeFileSync(envPath, 'TELEGRAM_CHAT_ID=111222333\n');
+    const r = run([], { lines: ['NO'] });
+    await r.done;
+    expect(r.t.text()).toContain('previously paired chat was removed');
+    expect(r.logged()).toEqual(['channel_token_changed']);
+  });
   it('withEnvValue: replaces, appends, removes, drops duplicates, keeps Windows line endings', () => {
     expect(withEnvValue(null, 'A', '1')).toBe('A=1\n');
     expect(withEnvValue('A=0\nB=2\nA=3\n', 'A', '1')).toBe('A=1\nB=2\n');
@@ -158,7 +171,7 @@ describe('pairing: only the exact code from a private chat, nothing else', () =>
     expect(r.t.text()).toContain('ends in ...321');
     expect(r.t.text()).not.toContain(String(CHAT));
     expect(r.t.text()).toContain(CODE); // the one-time code IS shown (that is its purpose)
-    expect(r.logged()).toBe(1);
+    expect(r.logged()).toEqual(['channel_token_changed', 'channel_paired']);
   });
   it('accepts the deep-link form "/start <code>"', async () => {
     const r = run([[msg(1, CHAT, `/start ${CODE}`)]]);
@@ -199,7 +212,7 @@ describe('pairing: only the exact code from a private chat, nothing else', () =>
     expect(await r.done).toBe(1);
     expect(r.t.text()).toContain('Timed out');
     expect(env()).not.toContain('TELEGRAM_CHAT_ID');
-    expect(r.logged()).toBe(0);
+    expect(r.logged()).toEqual(['channel_token_changed']); // the token change is logged even though pairing failed
   });
   it('the owner must type YES; anything else saves nothing', async () => {
     for (const answer of ['', 'yes', 'y', 'NO']) {
