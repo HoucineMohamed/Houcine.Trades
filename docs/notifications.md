@@ -123,7 +123,28 @@ never sent, but it stays on the Alerts page. Every attempt is logged with a shor
 `network` or `forbidden` (never free text). If the worker stops between sending and recording, one
 message may arrive twice: that is chosen over ever losing one.
 
-The header shows a small "Alerts: not getting through" mark only when alerts are on and failing.
+A message that was claimed for sending but never got a result (the worker died mid-send) counts as
+failed after 10 minutes and is retried.
+
+## How you find out that alerts are not working
+
+The worker writes a "last ran" time after every cycle. The Alerts page and the header warn you when
+alerts are on and any of these is true:
+
+- the worker has not run in the last 90 seconds, or never since you switched alerts on (start it with
+  `npm run notify:worker`);
+- Telegram is not set up, or the last three delivery results failed, or an event has been failing for
+  15 minutes;
+- an event of the last 7 days expired without ever being sent;
+- the stored settings or part of the app state could not be read in the last cycle.
+
+The header shows "Alerts: not getting through" in those cases, and "Alerts: status unknown" when the
+health itself cannot be read. Silence is never shown as "fine" when the state is unknown. Switching
+alerts on is refused while part of the current state cannot be read (it could not start from a known
+point). Switching on when alerts are already on does nothing.
+
+Sign-in failure bursts are announced at counts 3, 10, 30 and 100 within a 15-minute window, so a
+growing attack is not hidden behind the first message. "Send test message" works at most once a minute.
 
 ## If the token leaks
 
