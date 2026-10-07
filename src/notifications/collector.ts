@@ -2,8 +2,14 @@ import 'server-only';
 import { and, eq, gt, gte } from 'drizzle-orm';
 import { getAiSettings, getUsageTotals } from '@/data/analyst';
 import { listAccounts } from '@/data/accounts';
-import type { Db, Reader } from '@/data/client';
-import { currentMaxIds, insertEvents, readAllState, writeStates } from '@/data/notifications';
+import type { Db, Reader, Writer } from '@/data/client';
+import {
+  BASELINE_AT_KEY,
+  currentMaxIds,
+  insertEvents,
+  readAllState,
+  writeStates,
+} from '@/data/notifications';
 import { loadRiskContext } from '@/data/risk';
 import { aiUsage, authEvents, riskEvents, riskVerdicts, trades } from '@/data/schema';
 import {
@@ -15,9 +21,9 @@ import {
   haltClearedEvents,
   levelFromCap,
   levelFromShare,
-  LOGIN_BURST_WINDOW_MS,
   loginBurstEvents,
   makeEvent,
+  NOTIFY_LIMITS,
   parseLimitState,
   stepLimit,
   utcDayKey,
@@ -59,10 +65,13 @@ function observeLimits(
   const day = utcDayKey(now);
   const month = utcMonthKey(now);
   try {
-    for (const account of listAccounts(db as Db)) {
+    for (const account of listAccounts(db)) {
       try {
         const ctx = loadRiskContext(db, account.id, now); // read only
-        if (!ctx.accountKnown) continue;
+        if (!ctx.accountKnown) {
+          problems.push(`account_unknown_${account.id}`);
+          continue;
+        }
         const usage = computeRiskUsage(ctx);
         const add = (kind: UsageKind, level: Level | null, periodKey: string) =>
           obs.push({
@@ -105,7 +114,9 @@ function observeLimits(
   }
   try {
     const settings = getAiSettings(db, now);
-    if (settings.effective && settings.problem === null) {
+    if (settings.problem !== null || !settings.effective) {
+      problems.push('analyst_settings');
+    } else {
       const totals = getUsageTotals(db, now);
       // only "nearly reached" (80) and "reached" (100) are announced for the analyst
       const clamp = (l: Level | null): Level | null => (l === 50 ? 0 : l);
@@ -143,19 +154,36 @@ function observeLimits(
  * What to remember when alerts are switched ON: where each log ends now and the level every limit is
  * at now, so only things that happen FROM NOW ON are announced (nothing old floods the phone).
  */
-export function collectorBaseline(db: Reader, now: Date): Record<string, string> {
-  const ids = currentMaxIds(db);
-  const out: Record<string, string> = {
-    [WM.risk]: String(ids.risk),
-    [WM.verdict]: String(ids.verdict),
-    [WM.auth]: String(ids.auth),
-    [WM.usage]: String(ids.usage),
-  };
-  const { obs, halts } = observeLimits(db, now, []);
-  for (const o of obs)
-    out[o.stateKey] = JSON.stringify(baselineLimitState(o.observed, o.periodKey));
+export function collectorBaseline(
+  db: Reader,
+  now: Date,
+): { state: Record<string, string>; problems: string[] } {
+  const problems: string[] = [];
+  const out: Record<string, string> = {};
+  try {
+    const ids = currentMaxIds(db);
+    out[WM.risk] = String(ids.risk);
+    out[WM.verdict] = String(ids.verdict);
+    out[WM.auth] = String(ids.auth);
+    out[WM.usage] = String(ids.usage);
+  } catch {
+    problems.push('logs_unreadable');
+  }
+  let previous: Record<string, string> = {};
+  try {
+    previous = readAllState(db);
+  } catch {
+    problems.push('state_unreadable');
+  }
+  const { obs, halts } = observeLimits(db, now, problems);
+  for (const o of obs) {
+    const base = baselineLimitState(o.observed, o.periodKey);
+    // The epoch continues from the last switch-on: a new baseline must never reuse an old dedupe key.
+    const before = parseLimitState(previous[o.stateKey]);
+    out[o.stateKey] = JSON.stringify(before ? { ...base, epoch: before.epoch + 1 } : base);
+  }
   for (const [id, kinds] of halts) out[`halts:${id}`] = JSON.stringify(kinds);
-  return out;
+  return { state: out, problems };
 }
 
 export interface CollectReport {
@@ -166,10 +194,18 @@ export interface CollectReport {
   notBaselined: boolean;
 }
 
+const isStringList = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((x) => typeof x === 'string');
+
 const asId = (v: string | undefined): number | null =>
   v !== undefined && /^\d+$/.test(v) ? Number(v) : null;
 
+/** One immediate transaction: two collectors at once (worker and button) cannot both record or both advance. */
 export function collectEvents(db: Db, now: Date): CollectReport {
+  return db.transaction((tx) => collectIn(tx, now), { behavior: 'immediate' });
+}
+
+function collectIn(db: Writer, now: Date): CollectReport {
   const problems: string[] = [];
   const state = readAllState(db);
   const wm = {
@@ -203,7 +239,7 @@ export function collectEvents(db: Db, now: Date): CollectReport {
       });
       if (e) events.push(e);
     }
-    if (rows.length > 0) newState[WM.risk] = String(rows[rows.length - 1]?.id);
+    if (rows.length > 0) newState[WM.risk] = String(rows.at(-1)?.id);
   } catch {
     problems.push('risk_events');
   }
@@ -224,7 +260,7 @@ export function collectEvents(db: Db, now: Date): CollectReport {
       const e = eventFromVerdict(r);
       if (e) events.push(e);
     }
-    if (rows.length > 0) newState[WM.verdict] = String(rows[rows.length - 1]?.id);
+    if (rows.length > 0) newState[WM.verdict] = String(rows.at(-1)?.id);
   } catch {
     problems.push('risk_verdicts');
   }
@@ -239,7 +275,7 @@ export function collectEvents(db: Db, now: Date): CollectReport {
       const e = eventFromAuthEvent({ id: r.id, kind: r.kind, createdAt: r.createdAt });
       if (e) events.push(e);
     }
-    if (rows.length > 0) newState[WM.auth] = String(rows[rows.length - 1]?.id);
+    if (rows.length > 0) newState[WM.auth] = String(rows.at(-1)?.id);
   } catch {
     problems.push('auth_events');
   }
@@ -254,14 +290,19 @@ export function collectEvents(db: Db, now: Date): CollectReport {
       const e = eventFromAnalystUsage({ id: r.id, status: r.status, createdAt: r.createdAt });
       if (e) events.push(e);
     }
-    if (rows.length > 0) newState[WM.usage] = String(rows[rows.length - 1]?.id);
+    if (rows.length > 0) newState[WM.usage] = String(rows.at(-1)?.id);
   } catch {
     problems.push('ai_usage');
   }
 
   // ---- failed-login bursts: recomputed from the log each time (idempotent) ------------------------------
   try {
-    const since = new Date(now.getTime() - 2 * LOGIN_BURST_WINDOW_MS).toISOString();
+    // Looked at from alerts-on (older failures are never announced) and at most 24 hours back.
+    const floor = now.getTime() - NOTIFY_LIMITS.maxAgeMs;
+    const baselineMs = Date.parse(state[BASELINE_AT_KEY] ?? '');
+    const since = new Date(
+      Math.max(floor, Number.isFinite(baselineMs) ? baselineMs : floor),
+    ).toISOString();
     const times = db
       .select({ at: authEvents.createdAt })
       .from(authEvents)
@@ -296,10 +337,7 @@ export function collectEvents(db: Db, now: Date): CollectReport {
     let before: string[] | null = null;
     try {
       const parsed: unknown = state[key] ? JSON.parse(state[key] as string) : null;
-      before =
-        Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')
-          ? (parsed as string[])
-          : null;
+      before = isStringList(parsed) ? parsed : null;
     } catch {
       before = null;
     }
@@ -308,10 +346,7 @@ export function collectEvents(db: Db, now: Date): CollectReport {
   }
 
   // ---- record events and bookkeeping together (a crash cannot lose or repeat anything) ------------------------
-  const recorded = db.transaction((tx) => {
-    const n = insertEvents(tx, events, now);
-    writeStates(tx, newState, now);
-    return n;
-  });
+  const recorded = insertEvents(db, events, now);
+  writeStates(db, newState, now);
   return { recorded, problems, notBaselined: false };
 }
