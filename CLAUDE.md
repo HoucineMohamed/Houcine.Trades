@@ -6,10 +6,11 @@ It will run online 24/7 later. The owner is a trading beginner, so **correctness
 more than speed**. Built module by module (see `docs/roadmap.md`).
 
 Status: modules 1 (data model and journal), 2 (stats engine), 3 (risk engine), 4
-(authentication) and 5 (dashboard UI) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
+(authentication), 5 (dashboard UI) and 6 (Claude analyst v1, journal coach) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
 minimal functional UI, a pure stats engine (`/stats`), a pure risk engine (`/risk`) that approves or
 refuses trade plans, sizes positions and can halt trading, and single-owner login (password +
-authenticator code), and a calm dashboard UI (the "Ledger" design). No integrations yet. Every statistic is explained in `docs/stats-glossary.md`,
+authenticator code), and a calm dashboard UI (the "Ledger" design), and an AI analyst that only reviews and explains (`/analyst`, see
+`docs/analyst.md`). No other integrations yet. Every statistic is explained in `docs/stats-glossary.md`,
 every risk rule in `docs/risk-rules.md` and every protection in `docs/security.md`.
 
 > **Authentication exists, hosting does not.** The app still binds to localhost (`dev` and `start`
@@ -36,13 +37,17 @@ Next.js (App Router) + TypeScript (strict, `noUncheckedIndexedAccess`), SQLite v
 - `src/data/` database access: `schema.ts`, `client.ts`, repositories (`accounts`, `setups`, `trades`,
   `risk`, `risk-events`) and the `journal.ts` gate (every trade enters through the risk engine)
 - `drizzle/` committed SQL migrations (generated, do not edit by hand)
-- `src/integrations/` `tradingview-mcp/`, `exchanges/` (future adapters)
+- `src/analyst/` server-only analyst service (gates, one request at a time, input loaders, lazy
+  runtime); the only code that calls the AI client. `src/domain/analyst/` is its pure part
+- `src/integrations/` `anthropic/` (the AI client interface, `fetch` client, env validation),
+  `tradingview-mcp/`, `exchanges/` (future adapters)
 - `src/bots/` future bots framework
 - `src/config/` env loading and the paper-mode guard
 - `tests/` cross-cutting tests; module tests may sit beside their code as `*.test.ts`
 - `docs/` `architecture.md`, `roadmap.md`
 
-Dependency direction: `app -> domain, data`; `data -> domain, config`; `integrations -> domain`;
+Dependency direction: `app -> analyst, domain, data`; `analyst -> data, domain, integrations`;
+`data -> domain, config`; `integrations -> domain`;
 `bots -> domain, integrations`. `domain` imports from none of them.
 
 ## Commands
@@ -55,6 +60,8 @@ Dependency direction: `app -> domain, data`; `data -> domain, config`; `integrat
   and after pulling new migrations)
 - `npm run db:generate` create a new migration after changing `src/data/schema.ts` (commit it)
 - `npm run dev:seed` fill a separate DEMO database (refuses the real journal; see the README)
+- `npm run ai:set-key` put `ANTHROPIC_API_KEY` into `.env` (hidden input, real terminal only, never
+  prints the key)
 - `npm run auth:generate-secret` print a random `AUTH_SECRET`; `npm run auth:create-owner` create the
   one owner (real terminal only); `npm run auth:reset` reset password and authenticator
 
@@ -158,10 +165,35 @@ Five review agents live in `.claude/agents/` (details, license and attribution i
     banner stays until module 8. Do not put block elements (`div`, `details`) inside `<p>`.
   - The demo seed (`npm run dev:seed`) may only run on a file whose name contains "demo" and never on
     the real journal; its guard is tested. Demo data and screenshots are never committed.
+- Analyst rules (module 6), details in `docs/analyst.md`:
+  - **The analyst reviews and explains; it never decides.** It cannot approve, refuse, override or change
+    a plan, limit, halt, setting or order, and no analyst code may import those writers (a test checks).
+    Output is always shown with "AI commentary, not advice; the risk engine decides".
+  - **No tools:** the model call is text in, text out (no tools, MCP, web search, files). The client is
+    plain `fetch` (no SDK, no dependency); one request, **no retries**; the key only in a header.
+  - **Fail closed:** no key, invalid key, unpriced model, privacy switch OFF, unreadable settings or usage
+    log, or a reached cap means nothing is sent and a plain message is shown; the rest of the app is
+    unchanged. Every gate runs BEFORE the request, one request at a time.
+  - **Privacy switch** "Send journal data to the AI" is OFF by default; turning it ON needs the consent
+    screen and a `FreshAuth`; changes are logged in `auth_events`. User free text is scrubbed (emails,
+    key-like text, long numbers), cut with a visible marker and sent only inside delimited, line-quoted
+    `untrusted_data` blocks; the system prompt says to treat them as data.
+  - **Rule 3 holds:** the analyst may only quote figures from its input; every cited figure is matched by
+    exact text and flagged "unverified" otherwise. Nothing in the module calculates a financial figure.
+  - **Caps and cost:** ceilings in code (100 calls/day, 1000/month, 25 USD/month); tightening applies at
+    once, loosening after 24 hours with step-up. Cost is an ESTIMATE from `src/domain/analyst/pricing.ts`
+    (keep its "last verified" date current; a test fails if `ANALYST_MODEL` is not priced). The spend limit
+    in the Anthropic console is the real hard stop. `ai_usage` and `ai_reviews` are append-only; `ai_usage`
+    never stores prompts, answers or secrets.
+  - Output is escaped plain text only (no HTML, markdown, links, images). Tests never touch the network
+    (`tests/helpers/no-network.ts`); use `tests/helpers/analyst.ts` (the fake client). Never put a
+    key-looking literal in the repository: build test keys at run time.
 - Hand-written SQL in migrations is not tracked by drizzle-kit: the triggers protecting
   `initial_stop_loss` (`0001`), `closed_recorded_at` and the append-only `risk_events` /
   `risk_verdicts` (`0002`), and the auth triggers (`0003`: single owner, append-only `auth_events`,
-  frozen session identity, final revocation, single-use recovery codes). A future migration that rebuilds a table must re-create its triggers;
+  frozen session identity, final revocation, single-use recovery codes). Migration `0004` rebuilt
+  `auth_events` (three new event kinds) and re-created its two triggers, and added the append-only
+  `ai_usage` / `ai_reviews` and the undeletable `ai_settings` row. A future migration that rebuilds a table must re-create its triggers;
   tests list every trigger and fail if one is missing.
 - Schema changes: edit `src/data/schema.ts`, run `npm run db:generate`, commit the new file in
   `drizzle/`. CI fails if the schema and migrations disagree.

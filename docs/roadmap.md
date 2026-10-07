@@ -60,8 +60,22 @@ Modules are built in this order, each on its own branch with tests and small com
    crafted link could show a false "saved" text; nothing is changed by it); an error or "not found"
    page renders without the header; if the remembered account was deleted the first account is
    shown without a notice.
-6. **Claude analyst and TradingView MCP**: AI analysis; the AI never does the math. Vet the MCP
-   server first (rule 8).
+6. **Claude analyst v1 (journal coach)** - **DONE**: an AI that reviews and explains and never
+   decides: plan review after the risk verdict, a weekly review per currency, a tutor, all with
+   structured output checked by zod, every cited figure matched against the input, a trade-instruction
+   wording check, escaped plain-text rendering, no tools (text in, text out), a privacy switch (OFF by
+   default, turning it ON needs a fresh code), spend caps with ceilings in code (tighten now, loosen
+   after 24 h with a code), an append-only usage log and stored reviews, a price table with a
+   last-verified date, `npm run ai:set-key` (hidden input) and `docs/analyst.md`. The API client is
+   plain `fetch` (no new dependency). _Done when_: the three features work against a fake client, the
+   app works unchanged without a key, caps and fail-closed behaviour are tested (they are).
+   Carried forward: **the first real call has not been made** (no key or network in the build
+   session): the request follows the current official docs and failures show a plain message with the
+   provider's request id; the TradingView MCP half of this item is NOT built (it stays here until it
+   is vetted, rule 8); figures quoted in running prose (not in the cited list) are not checked; the
+   instruction-wording check is a rough word list; the estimated cost is an estimate (the Console
+   limit is the real stop); `src/analyst/` is a new layer between `app` and `integrations`.
+   TradingView MCP: still to do.
 7. **Notifications**: alerts for risk limits and events.
 8. **24/7 deployment and backups**: hosting (persistent disk for SQLite), HTTPS, automated
    encrypted backups, restore test.

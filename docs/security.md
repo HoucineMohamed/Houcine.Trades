@@ -101,6 +101,26 @@ Other protections that exist alongside it:
 
 **The job must be green before any real API key is used** (roadmap).
 
+## The analyst and its API key (module 6)
+
+Plain-language version: `docs/analyst.md`. The protections, all tested:
+
+- `ANTHROPIC_API_KEY` lives only in `.env` (git ignores it), set by `npm run ai:set-key` (hidden
+  input, real terminal only, never an argument, never printed beyond the last 4 characters). It is
+  validated lazily; builds, tests and the db commands need none. A missing or placeholder key means
+  the analyst is off.
+- The key goes only into the `x-api-key` header of one fixed HTTPS URL. It is never logged, never in a
+  page, an error message, a stored record or a result; tests scan all of those (including a provider
+  that echoes the key back).
+- The model call has no tools. A hostile note cannot change the structure of the request, the
+  verdict, a setting or a stored value, and a reply with extra fields is rejected as a whole.
+- Privacy switch OFF by default; ON needs a fresh authenticator code and is logged. Raising a spend
+  cap needs one too and waits 24 hours.
+- Keep a monthly spend limit in the Anthropic console: it is the real hard stop.
+- Known limits: text you type in notes goes to Anthropic once the switch is on (emails, key-like text
+  and long numbers are masked first, but masking is not perfect); the first real API call was not
+  tested live in the build session; the usage cost is an estimate.
+
 ## What module 8 (hosting) must do
 
 This module does not configure hosting. Before exposing the app:
