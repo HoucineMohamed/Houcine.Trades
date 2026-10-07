@@ -52,6 +52,7 @@ function run(
     token?: string;
     totalMs?: number;
     argv?: string[];
+    raw?: boolean;
   } = {},
 ) {
   const token = o.token ?? fakeBotToken();
@@ -79,6 +80,11 @@ function run(
   });
   return { token, t, source, done, logged: () => logged };
 }
+/** The stored chat id (the token line has random digits, so never search the whole file). */
+const chatLine = () =>
+  env()
+    .split('\n')
+    .find((l) => l.startsWith('TELEGRAM_CHAT_ID=')) ?? '';
 const env = () => (fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '');
 
 describe('npm run notify:set-telegram: the token', () => {
@@ -127,7 +133,6 @@ describe('npm run notify:set-telegram: the token', () => {
       '# mine\nDATABASE_URL=file:./x.db\nTELEGRAM_BOT_TOKEN=old\nTELEGRAM_CHAT_ID=111222333\nTRADING_MODE=paper\n',
     );
     const r = run([], { lines: ['NO'] });
-    r.source; // no pairing message ever arrives
     await r.done;
     const text = env();
     expect(text).toContain('# mine');
@@ -175,13 +180,13 @@ describe('pairing: only the exact code from a private chat, nothing else', () =>
     expect(await r.done).toBe(0);
     expect(env()).toContain(`TELEGRAM_CHAT_ID=${CHAT}`);
     for (const wrong of ['555', '556', '557', '558', '559', '560', '561', '562', '100123'])
-      expect(env()).not.toContain(wrong);
+      expect(chatLine()).not.toContain(wrong);
   });
   it('a stale message that was waiting BEFORE pairing started can never pair (it is thrown away first)', async () => {
     const r = run([[msg(1, 777, CODE)], [], [msg(2, CHAT, CODE)]], { raw: true });
     expect(await r.done).toBe(0);
     expect(env()).toContain(`TELEGRAM_CHAT_ID=${CHAT}`);
-    expect(env()).not.toContain('777');
+    expect(chatLine()).not.toContain('777');
   });
   it('two DIFFERENT chats sending the code at once is refused (fail closed)', async () => {
     const r = run([[], [msg(1, 111_222_333, CODE), msg(2, 444_555_666, CODE)]]);
