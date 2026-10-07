@@ -1,13 +1,15 @@
-import { and, asc, desc, eq, gte, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { assertFreshAuth, type FreshAuth } from '@/domain/auth/stepup';
 import { ValidationError } from '@/domain/errors';
 import {
+  EXPIRED_LOOKBACK_MS,
   HOUR_MS,
   itemStatus,
   makeEvent,
   NOTIFY_LIMITS,
   parsePending,
   parseSettings,
+  passesSettings,
   planBatch,
   requestSettingsChange,
   settleSettings,
@@ -16,6 +18,7 @@ import {
   type ChannelName,
   type DeliveryStatus,
   type ErrorCode,
+  type HealthInput,
   type ItemStatus,
   type NotificationEvent,
   type NotificationSettings,
@@ -185,69 +188,78 @@ export function setNotificationsMaster(
   baseline: Record<string, string> = {},
 ): void {
   assertFreshAuth(auth, now, on ? 'turning on alerts' : 'turning off alerts');
-  db.transaction((tx) => {
-    const view = getNotificationSettings(tx, now);
-    if (on) {
-      if (view.problem !== null || view.effective === null) {
-        throw new ValidationError([
+  db.transaction(
+    (tx) => {
+      const view = getNotificationSettings(tx, now);
+      if (on) {
+        if (view.problem !== null || view.effective === null) {
+          throw new ValidationError([
+            {
+              field: '',
+              message: `The stored notification settings are corrupt (${view.problem}), so alerts cannot be turned on.`,
+            },
+          ]);
+        }
+        // Already on: nothing to do. (Re-baselining would skip events that were not collected yet.)
+        if (view.master) return;
+        writeSettings(
+          tx,
           {
-            field: '',
-            message: `The stored notification settings are corrupt (${view.problem}), so alerts cannot be turned on.`,
+            master: true,
+            consentAt: now.toISOString(),
+            settings: view.effective,
+            pending: view.pending,
           },
-        ]);
+          now,
+        );
+        writeStates(
+          tx,
+          { ...baseline, [HEARTBEAT_KEY]: now.toISOString(), [BASELINE_AT_KEY]: now.toISOString() },
+          now,
+        );
+        logChange(tx, 'notifications_on', 'master_switch', now, meta, auth);
+        return;
       }
-      writeSettings(
+      if (!view.master) return; // already off: nothing to announce or log
+      if (view.problem !== null || view.effective === null) {
+        tx.update(notificationSettings)
+          .set({ master: 0, updatedAt: now.toISOString() })
+          .where(eq(notificationSettings.id, 1))
+          .run();
+      } else {
+        writeSettings(
+          tx,
+          {
+            master: false,
+            consentAt: view.consentAt,
+            settings: view.effective,
+            pending: view.pending,
+          },
+          now,
+        );
+      }
+      insertEvents(
         tx,
-        {
-          master: true,
-          consentAt: now.toISOString(),
-          settings: view.effective,
-          pending: view.pending,
-        },
+        [
+          makeEvent({
+            kind: 'notifications_switched_off',
+            dedupeKey: `switched_off:${now.toISOString()}`,
+            occurredAt: now.toISOString(),
+          }),
+        ],
         now,
       );
-      writeStates(tx, baseline, now);
-      logChange(tx, 'notifications_on', 'master_switch', now, meta, auth);
-      return;
-    }
-    if (!view.master) return; // already off: nothing to announce or log
-    if (view.problem !== null || view.effective === null) {
-      tx.update(notificationSettings)
-        .set({ master: 0, updatedAt: now.toISOString() })
-        .where(eq(notificationSettings.id, 1))
-        .run();
-    } else {
-      writeSettings(
+      logChange(
         tx,
-        {
-          master: false,
-          consentAt: view.consentAt,
-          settings: view.effective,
-          pending: view.pending,
-        },
+        'notifications_off',
+        view.problem !== null ? 'master_switch_settings_corrupt' : 'master_switch',
         now,
+        meta,
+        auth,
       );
-    }
-    insertEvents(
-      tx,
-      [
-        makeEvent({
-          kind: 'notifications_switched_off',
-          dedupeKey: `switched_off:${now.toISOString()}`,
-          occurredAt: now.toISOString(),
-        }),
-      ],
-      now,
-    );
-    logChange(
-      tx,
-      'notifications_off',
-      view.problem !== null ? 'master_switch_settings_corrupt' : 'master_switch',
-      now,
-      meta,
-      auth,
-    );
-  });
+    },
+    { behavior: 'immediate' },
+  );
 }
 
 /**
@@ -261,40 +273,48 @@ export function updateNotificationSettings(
   now: Date = new Date(),
   meta: ActorMeta = {},
 ): SettingsChange {
-  return db.transaction((tx) => {
-    const view = getNotificationSettings(tx, now);
-    if (view.problem !== null || view.effective === null) {
-      throw new ValidationError([
+  return db.transaction(
+    (tx) => {
+      const view = getNotificationSettings(tx, now);
+      if (view.problem !== null || view.effective === null) {
+        throw new ValidationError([
+          {
+            field: '',
+            message: `The stored notification settings are corrupt (${view.problem}). They cannot be edited.`,
+          },
+        ]);
+      }
+      const result = requestSettingsChange(view.effective, view.pending, requested, now);
+      if (result.deferred.length > 0)
+        assertFreshAuth(auth, now, 'switching off or quieting alerts');
+      writeSettings(
+        tx,
         {
-          field: '',
-          message: `The stored notification settings are corrupt (${view.problem}). They cannot be edited.`,
+          master: view.master,
+          consentAt: view.consentAt,
+          settings: result.active,
+          pending: result.pending,
         },
-      ]);
-    }
-    const result = requestSettingsChange(view.effective, view.pending, requested, now);
-    if (result.deferred.length > 0) assertFreshAuth(auth, now, 'switching off or quieting alerts');
-    writeSettings(
-      tx,
-      {
-        master: view.master,
-        consentAt: view.consentAt,
-        settings: result.active,
-        pending: result.pending,
-      },
-      now,
-    );
-    const parts = [
-      result.applied.length > 0 ? 'louder_now' : null,
-      result.deferred.length > 0 ? 'quieter_requested' : null,
-      result.cancelled.length > 0 ? 'pending_cancelled' : null,
-    ].filter((p): p is string => p !== null);
-    if (parts.length > 0)
-      logChange(tx, 'notifications_settings_changed', parts.join('+'), now, meta, auth);
-    return result;
-  });
+        now,
+      );
+      const parts = [
+        result.applied.length > 0 ? 'louder_now' : null,
+        result.deferred.length > 0 ? 'quieter_requested' : null,
+        result.cancelled.length > 0 ? 'pending_cancelled' : null,
+      ].filter((p): p is string => p !== null);
+      if (parts.length > 0)
+        logChange(tx, 'notifications_settings_changed', parts.join('+'), now, meta, auth);
+      return result;
+    },
+    { behavior: 'immediate' },
+  );
 }
 
 // ---- collector bookkeeping ---------------------------------------------------------------------------------
+
+export const HEARTBEAT_KEY = 'hb:cycle';
+export const BASELINE_AT_KEY = 'baseline:at';
+const LAST_PROBLEMS_KEY = 'last:problems';
 
 export function readState(db: Reader, key: string): string | null {
   return (
@@ -486,7 +506,7 @@ export function claimDue(
       const items = loadOutbox(tx, now).filter((i) => allow(i.event));
       const due = items.filter((i) => itemStatus(i, now).status === 'due');
       const sentRows = tx
-        .select({ kind: notificationEvents.kind })
+        .select({ kind: notificationEvents.kind, severity: notificationEvents.severity })
         .from(notificationDeliveries)
         .innerJoin(notificationEvents, eq(notificationDeliveries.eventId, notificationEvents.id))
         .where(
@@ -607,6 +627,7 @@ export function getHealthInput(
   const recent = db
     .select({ status: notificationDeliveries.status })
     .from(notificationDeliveries)
+    .where(ne(notificationDeliveries.status, 'sending')) // the claim rows are not results
     .orderBy(desc(notificationDeliveries.id))
     .limit(3)
     .all()
@@ -633,4 +654,101 @@ export function lastEventAt(db: Reader, kind: NotificationEvent['kind']): string
       .limit(1)
       .get()?.at ?? null
   );
+}
+
+/** Looks an event up by its dedupe key. */
+export function findEventByKey(db: Reader, dedupeKey: string): NotificationEventRow | undefined {
+  return db
+    .select()
+    .from(notificationEvents)
+    .where(eq(notificationEvents.dedupeKey, dedupeKey))
+    .get();
+}
+
+/** The worker (or "Deliver now") writes this after every cycle: proof it ran, and what it could not do. */
+export function writeHeartbeat(db: Db, now: Date, problems: readonly string[]): void {
+  db.transaction((tx) =>
+    writeStates(
+      tx,
+      {
+        [HEARTBEAT_KEY]: now.toISOString(),
+        [LAST_PROBLEMS_KEY]: JSON.stringify([...new Set(problems)].slice(0, 20)),
+      },
+      now,
+    ),
+  );
+}
+
+function readProblems(db: Reader): string[] {
+  try {
+    const parsed: unknown = JSON.parse(readState(db, LAST_PROBLEMS_KEY) ?? '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === 'string')
+      : ['unreadable'];
+  } catch {
+    return ['unreadable'];
+  }
+}
+
+/** Events of the last 7 days that were never sent and are now too old to be sent (and not filtered by the settings). */
+export function countExpiredUnsent(
+  db: Reader,
+  now: Date,
+  allow: (e: NotificationEvent) => boolean,
+): number {
+  const oldest = new Date(now.getTime() - EXPIRED_LOOKBACK_MS).toISOString();
+  const newest = new Date(now.getTime() - NOTIFY_LIMITS.maxAgeMs).toISOString();
+  const sentIds = db
+    .select({ id: notificationDeliveries.eventId })
+    .from(notificationDeliveries)
+    .where(eq(notificationDeliveries.status, 'sent'));
+  return db
+    .select()
+    .from(notificationEvents)
+    .where(
+      and(
+        gte(notificationEvents.occurredAt, oldest),
+        lt(notificationEvents.occurredAt, newest),
+        notInArray(notificationEvents.id, sentIds),
+      ),
+    )
+    .all()
+    .map(toEvent)
+    .filter(allow).length;
+}
+
+/**
+ * Everything the header and the page need to say whether alerts are getting through. Never throws:
+ * if the health cannot be read it returns null, and the caller must show "status unknown", never "fine".
+ */
+export function loadHealth(
+  db: Reader,
+  now: Date,
+  channelReady: boolean,
+): { input: HealthInput; problems: string[] } | null {
+  try {
+    const settings = getNotificationSettings(db, now);
+    const effective = settings.effective;
+    const base = getHealthInput(db, now);
+    const hb = readState(db, HEARTBEAT_KEY);
+    const hbMs = hb ? Date.parse(hb) : Number.NaN;
+    const problems = readProblems(db);
+    return {
+      problems,
+      input: {
+        masterOn: settings.master,
+        channelReady,
+        recentStatuses: base.recentStatuses,
+        oldestFailingAgeMs: base.oldestFailingAgeMs,
+        heartbeatAgeMs: Number.isFinite(hbMs) ? Math.max(0, now.getTime() - hbMs) : null,
+        settingsProblem: settings.problem !== null,
+        expiredUnsent: effective
+          ? countExpiredUnsent(db, now, (e) => passesSettings(e, effective))
+          : 0,
+        collectorProblems: problems.length,
+      },
+    };
+  } catch {
+    return null;
+  }
 }
