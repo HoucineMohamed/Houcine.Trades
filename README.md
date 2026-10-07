@@ -181,12 +181,20 @@ CI fails if the schema changed without a committed migration.
 | `npm run auth:create-owner`    | create the one owner (password, authenticator, recovery codes) |
 | `npm run auth:reset`           | reset the owner's password and authenticator                   |
 | `npm run ai:set-key`           | put the analyst's API key into `.env` (hidden input)           |
+| `npm run notify:set-telegram`  | put the Telegram bot token into `.env` and pair your chat      |
+| `npm run notify:worker`        | collect events and deliver alerts every 30 s (Ctrl+C to stop)  |
 
 ## The analyst (optional)
 
 An AI that reviews and explains your journal (plan review, weekly review, tutor). It is off until you
 add a key and switch it on. Step-by-step setup, costs and safety: [docs/analyst.md](docs/analyst.md).
 The app works the same without it.
+
+## Phone alerts (optional)
+
+One-way Telegram alerts for things that happen inside the app (limits, halts, sign-ins). They are off
+until you set up a bot, switch them on and confirm with your authenticator code. Step-by-step setup and
+safety: [docs/notifications.md](docs/notifications.md). The app works the same without them.
 
 ## Safety notes
 

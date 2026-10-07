@@ -76,7 +76,23 @@ Modules are built in this order, each on its own branch with tests and small com
    instruction-wording check is a rough word list; the estimated cost is an estimate (the Console
    limit is the real stop); `src/analyst/` is a new layer between `app` and `integrations`.
    TradingView MCP: still to do.
-7. **Notifications**: alerts for risk limits and events.
+7. **Notifications** - **DONE**: one-way Telegram alerts for events INSIDE the app. Events are derived
+   (pure, tested) from existing records and from the limits' usage: limits at 50/80/100 %, halts started and
+   cleared, a refused drawdown reset, overrides, sign-in failures (summarized), sign-ins, recovery codes,
+   password and security changes, analyst caps and failed calls; reserved types for backups and market data.
+   Recorded first (append-only outbox), delivered later with capped backoff, a 24 h maximum age, an hourly
+   ceiling (20 plus 10 critical) and one summary; fixed message templates with no free text; a channel
+   interface (Telegram adapter on `fetch`, fake adapter for tests); `npm run notify:worker`,
+   `npm run notify:set-telegram` (hidden token, one-time-code pairing, private chat only); a master switch
+   (OFF by default; ON and OFF need a fresh code; OFF sends one final notice); category switches and minimum
+   severity (quieter changes wait 24 h; critical never off); the `/notifications` page and a header indicator;
+   `docs/notifications.md`. _Done when_: events are recorded reliably, delivered through the interface, nothing
+   is sent until switched on with consent, failures never block the app (they do not: proven by tests).
+   Carried forward: **the first real Telegram call has not been made** and several Telegram facts are
+   unconfirmed (listed in `docs/notifications.md`, "to confirm on first live test"); delivery is
+   at-least-once (one message may repeat after a crash); no price or market alerts (no market data); other
+   channels are only the interface; the worker is a script until module 8 runs it as a service; a held-back
+   event older than 24 h expires and is never sent.
 8. **24/7 deployment and backups**: hosting (persistent disk for SQLite), HTTPS, automated
    encrypted backups, restore test.
 9. **Exchange adapter (testnet)** with confirm button and kill switch (**no override: orders must pass

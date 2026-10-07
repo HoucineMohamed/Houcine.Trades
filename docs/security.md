@@ -121,6 +121,29 @@ Plain-language version: `docs/analyst.md`. The protections, all tested:
   and long numbers are masked first, but masking is not perfect); the first real API call was not
   tested live in the build session; the usage cost is an estimate.
 
+## Alerts and the Telegram token (module 7)
+
+Plain-language version: `docs/notifications.md`. The protections, all tested:
+
+- The channel is one-way: no webhook, no listening bot, no remote command. Incoming messages are read only
+  during the one-time pairing, and only the exact one-time code from a private chat is accepted.
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` live only in `.env`, set by `npm run notify:set-telegram`
+  (hidden input, real terminal only, never an argument, last 4 characters shown, refuses if `.gitignore`
+  does not cover `.env`). Validated lazily; placeholders and group chat ids are rejected.
+- The Bot API puts the token inside the request URL, so the adapter never logs, stores, throws or returns a
+  URL, a request or a raw fetch error: every failure becomes a short code (`network`, `forbidden`, ...). A
+  test feeds it errors that contain the URL and scans the database, console, results and pages.
+- A notification never contains notes, emotions, setup names, symbols, account names, balances, amounts,
+  prices, keys, tokens, passwords, emails or IP addresses (fixed templates; golden and hostile-data tests).
+- The master switch is OFF by default; ON needs the consent screen and a fresh code, OFF needs a fresh code
+  too, and quieter settings wait 24 hours (so an intruder cannot silence alerts quickly). Critical events
+  cannot be switched off. Everything is logged in `auth_events`.
+- A notification failure can never block a trade, a halt, a risk check or a login: nothing in those paths
+  imports the notification code.
+- Known limits: messages pass through Telegram's servers and bot chats are not end-to-end encrypted (so
+  nothing sensitive is ever in them); delivery is at-least-once; the first real Telegram call was not tested
+  and some Telegram facts are unconfirmed (see `docs/notifications.md`).
+
 ## What module 8 (hosting) must do
 
 This module does not configure hosting. Before exposing the app:
