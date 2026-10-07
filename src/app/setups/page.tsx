@@ -8,40 +8,72 @@ export default guardedPage(
     const setups = listSetups(ctx.db);
     return (
       <main>
-        <h1>Setups</h1>
-        <p>
-          A setup is a strategy tag (for example &quot;Breakout&quot;) used later for statistics.
-        </p>
-        {ok && <p role="status">✅ {ok}</p>}
-        {error && <p role="alert">❌ {error}</p>}
-
-        <h2>New setup</h2>
-        <form action={createSetupAction}>
-          <p>
-            <label>
-              Name <input name="name" required maxLength={60} />
-            </label>
+        <div className="page-head">
+          <h1>Setups</h1>
+          <p className="lead">
+            A setup is a strategy tag (for example &quot;Breakout&quot;). The Stats page groups your
+            results by setup.
           </p>
-          <p>
-            <label>
-              Description <input name="description" maxLength={500} size={60} />
-            </label>
+        </div>
+        {ok && (
+          <p role="status" className="notice notice-ok">
+            {ok}
           </p>
-          <button type="submit">Create setup</button>
-        </form>
-
-        <h2>Your setups</h2>
-        {setups.length === 0 ? (
-          <p>No setups yet.</p>
-        ) : (
-          <ul>
-            {setups.map((s) => (
-              <li key={s.id}>
-                <strong>{s.name}</strong> {s.description && <>- {s.description}</>}
-              </li>
-            ))}
-          </ul>
         )}
+        {error && (
+          <p role="alert" className="notice notice-alert">
+            {error}
+          </p>
+        )}
+
+        <section aria-labelledby="new-setup">
+          <div className="section-head">
+            <h2 id="new-setup">New setup</h2>
+          </div>
+          <form action={createSetupAction} className="panel">
+            <div className="form-grid">
+              <div className="field">
+                <label htmlFor="s-name">Name</label>
+                <input id="s-name" name="name" required maxLength={60} />
+              </div>
+              <div className="field wide">
+                <label htmlFor="s-desc">Description</label>
+                <input id="s-desc" name="description" maxLength={500} />
+              </div>
+            </div>
+            <button type="submit">Create setup</button>
+          </form>
+        </section>
+
+        <section aria-labelledby="your-setups">
+          <div className="section-head">
+            <h2 id="your-setups">Your setups</h2>
+          </div>
+          {setups.length === 0 ? (
+            <p className="small">No setups yet.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {setups.map((s) => (
+                    <tr key={s.id}>
+                      <td>
+                        <strong>{s.name}</strong>
+                      </td>
+                      <td>{s.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </main>
     );
   },

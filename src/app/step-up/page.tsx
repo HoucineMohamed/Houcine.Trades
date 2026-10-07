@@ -21,11 +21,21 @@ export default guardedPage(
           Sensitive actions (loosening a risk limit, resetting a halt, logging an override, security
           settings) need a code from your authenticator app, entered in the last 5 minutes.
         </p>
-        {ctx.auth && <p role="status">🔓 A code was already accepted in the last 5 minutes.</p>}
-        {sp.e === 'throttled' && (
-          <p role="alert">❌ Too many attempts. Wait {wait} seconds before trying again.</p>
+        {ctx.auth && (
+          <p role="status" className="notice notice-ok">
+            A code was already accepted in the last 5 minutes.
+          </p>
         )}
-        {sp.e === 'invalid' && <p role="alert">❌ The code was not accepted.</p>}
+        {sp.e === 'throttled' && (
+          <p role="alert" className="notice notice-alert">
+            Too many attempts. Wait {wait} seconds before trying again.
+          </p>
+        )}
+        {sp.e === 'invalid' && (
+          <p role="alert" className="notice notice-alert">
+            The code was not accepted.
+          </p>
+        )}
         <form action={stepUpAction}>
           <input type="hidden" name="next" value={safeNext(sp.next)} />
           <p>

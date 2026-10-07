@@ -38,28 +38,31 @@ export default guardedPage(async (ctx, { params }: { params: Promise<{ id: strin
 
   return (
     <main>
-      <h1>
-        Edit trade #{trade.id} ({trade.symbol})
-      </h1>
-      <p>
-        Account: {account?.name} | Status: <strong>{trade.status}</strong>
-        {trade.entryPrice && <> | Entry: {trade.entryPrice}</>}
-        {trade.exitPrice && <> | Exit: {trade.exitPrice}</>}
-        {trade.openedAt && <> | Opened: {formatLocal(trade.openedAt)}</>}
-        {trade.closedAt && <> | Closed: {formatLocal(trade.closedAt)}</>}
-      </p>
+      <div className="page-head">
+        <h1>
+          Edit trade #{trade.id} ({trade.symbol})
+        </h1>
+        <p className="lead">
+          Account {account?.name}, status <strong>{trade.status}</strong>
+          {trade.entryPrice && <>, entry {trade.entryPrice}</>}
+          {trade.exitPrice && <>, exit {trade.exitPrice}</>}
+          {trade.openedAt && <>, opened {formatLocal(trade.openedAt)}</>}
+          {trade.closedAt && <>, closed {formatLocal(trade.closedAt)}</>}.{' '}
+          <Link href={`/trades/${trade.id}`}>Back to the trade</Link>
+        </p>
+      </div>
       {trade.status === 'cancelled' ? (
-        <p>A cancelled trade is locked and cannot be edited.</p>
+        <p className="notice notice-note">A cancelled trade is locked and cannot be edited.</p>
       ) : (
         <>
           {trade.status === 'closed' && (
-            <p>
+            <p className="notice notice-note">
               This trade is closed: prices and size are locked. You can still update the review
               notes, emotion and screenshot.
             </p>
           )}
           {trade.status === 'open' && (
-            <p>
+            <p className="notice notice-note">
               This trade is open: you can change stop-loss, take-profit, fees and notes. Greyed-out
               fields are locked.
             </p>
@@ -75,9 +78,6 @@ export default guardedPage(async (ctx, { params }: { params: Promise<{ id: strin
           />
         </>
       )}
-      <p>
-        <Link href="/trades">Back to trades</Link>
-      </p>
     </main>
   );
 });

@@ -148,7 +148,7 @@ export function scanSource(file: string, source: string): Scan {
         (s) =>
           ts.isImportDeclaration(s) &&
           ts.isStringLiteral(s.moduleSpecifier) &&
-          /_lib\/guard-core$/.test(s.moduleSpecifier.text) &&
+          /(^|\/)guard-core$/.test(s.moduleSpecifier.text) &&
           s.importClause?.namedBindings !== undefined &&
           ts.isNamedImports(s.importClause.namedBindings) &&
           s.importClause.namedBindings.elements.some((el) => el.name.text === e.wrapper),

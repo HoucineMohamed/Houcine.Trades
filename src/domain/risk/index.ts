@@ -5,3 +5,4 @@ export * from './settings';
 export * from './size';
 export * from './time';
 export * from './types';
+export * from './usage';

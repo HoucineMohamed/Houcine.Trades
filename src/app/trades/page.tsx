@@ -1,152 +1,88 @@
 import Link from 'next/link';
-import { listAccounts } from '@/data/accounts';
-import { getTradeRiskFlags } from '@/data/journal';
-import { listSetups } from '@/data/setups';
-import { listTrades } from '@/data/trades';
-import { ValidationError } from '@/domain/errors';
-import { isHttpUrl } from '@/domain/fields';
-import type { TradeFilter } from '@/domain/trades/inputs';
-import { STATUSES, type Trade } from '@/domain/trades/types';
+import { listJournal, type JournalRow } from '@/data/journal-view';
+import { STATUSES, DIRECTIONS } from '@/domain/trades/types';
+import { defaultDir, parseJournalQuery, type SortKey } from '@/domain/trades/table';
+import { selectedAccount } from '../_lib/account';
+import { formatAmount, formatUtc } from '../_lib/format';
 import { guardedPage } from '../_lib/guard';
-import { StepUpField } from '../_lib/StepUpField';
-import { formatLocal, orUndefined, toId, utcToLocalInput } from '../_lib/form';
-import { cancelTradeAction, closeTradeAction, openTradeAction } from './actions';
+import { Signed, SignedR } from '../_lib/ui';
+import { ariaSort, journalHref, sortHref } from './query';
 
-interface SearchParams {
-  ok?: string;
-  error?: string;
-  status?: string;
-  symbol?: string;
-  account?: string;
-}
+type SearchParams = Record<string, string | string[] | undefined>;
 
-function RowActions({
-  trade,
-  nowLocal,
-  fresh,
+function SortHeader({
+  q,
+  sortKey,
+  children,
+  num,
 }: {
-  trade: Trade;
-  nowLocal: string;
-  fresh: boolean;
+  q: ReturnType<typeof parseJournalQuery>;
+  sortKey: SortKey;
+  children: string;
+  num?: boolean;
 }) {
   return (
-    <>
-      {trade.status !== 'cancelled' && <Link href={`/trades/${trade.id}/edit`}>Edit</Link>}
-      {trade.status === 'planned' && (
-        <>
-          <details>
-            <summary>Open it</summary>
-            <form action={openTradeAction}>
-              <input type="hidden" name="id" value={trade.id} />
-              <p>
-                <label>
-                  Entry price{' '}
-                  <input
-                    name="entryPrice"
-                    required
-                    inputMode="decimal"
-                    defaultValue={trade.plannedEntry}
-                  />
-                </label>
-              </p>
-              <p>
-                <label>
-                  Opened at{' '}
-                  <input name="openedAt" type="datetime-local" required defaultValue={nowLocal} />
-                </label>
-              </p>
-              <p>
-                <small>
-                  If the risk engine refuses to open this trade, you can log it anyway: type
-                  OVERRIDE and a reason (it will be flagged forever). Leave these empty otherwise.
-                </small>
-              </p>
-              <p>
-                <label>
-                  Type OVERRIDE <input name="overrideConfirm" autoComplete="off" />
-                </label>
-              </p>
-              <p>
-                <label>
-                  Reason <input name="overrideReason" size={40} autoComplete="off" />
-                </label>
-              </p>
-              <StepUpField fresh={fresh} />
-              <button type="submit">Mark as open</button>
-            </form>
-          </details>
-          <form action={cancelTradeAction}>
-            <input type="hidden" name="id" value={trade.id} />
-            <button type="submit">Cancel trade</button>
-          </form>
-        </>
-      )}
-      {trade.status === 'open' && (
-        <details>
-          <summary>Close it</summary>
-          <form action={closeTradeAction}>
-            <input type="hidden" name="id" value={trade.id} />
-            <p>
-              <label>
-                Exit price <input name="exitPrice" required inputMode="decimal" />
-              </label>
-            </p>
-            <p>
-              <label>
-                Closed at{' '}
-                <input name="closedAt" type="datetime-local" required defaultValue={nowLocal} />
-              </label>
-            </p>
-            <p>
-              <label>
-                Fees (optional) <input name="fees" inputMode="decimal" />
-              </label>
-            </p>
-            <button type="submit">Close trade</button>
-          </form>
-        </details>
-      )}
-    </>
+    <th className={num ? 'num' : undefined} aria-sort={ariaSort(q, sortKey)}>
+      <Link className="sort-link" href={sortHref(q, sortKey)}>
+        {children}
+        {q.sort === sortKey ? (q.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+      </Link>
+    </th>
   );
 }
+
+const when = (r: JournalRow) =>
+  r.status === 'closed' ? formatUtc(r.closedAt) : r.openedAt ? formatUtc(r.openedAt) : '';
 
 export default guardedPage(
   async (ctx, { searchParams }: { searchParams: Promise<SearchParams> }) => {
     const sp = await searchParams;
-    const db = ctx.db;
-    const accounts = listAccounts(db);
-    const setupNames = new Map(listSetups(db).map((s) => [s.id, s.name]));
-    const accountNames = new Map(accounts.map((a) => [a.id, a.name]));
-    const riskFlags = getTradeRiskFlags(db);
-
-    let trades: Trade[] = [];
-    let filterError: string | null = null;
-    try {
-      trades = listTrades(db, {
-        status: orUndefined(sp.status) as TradeFilter['status'],
-        symbol: orUndefined(sp.symbol),
-        accountId: toId(sp.account),
-      });
-    } catch (error) {
-      if (!(error instanceof ValidationError)) throw error;
-      filterError = error.message;
+    const { selected } = await selectedAccount(ctx);
+    if (!selected) {
+      return (
+        <main>
+          <div className="page-head">
+            <h1>Journal</h1>
+          </div>
+          <div className="empty">
+            <h2>No account yet</h2>
+            <p>
+              The journal belongs to an account.{' '}
+              <Link href="/accounts">Create a paper account</Link> first, then log a trade.
+            </p>
+          </div>
+        </main>
+      );
     }
-    const nowLocal = utcToLocalInput(new Date().toISOString());
+    const q = parseJournalQuery(sp);
+    const view = listJournal(ctx.db, selected.id, q);
+    const { page } = view;
+    const filtered = q.status || q.direction || q.symbol || q.setupId !== null || q.overrideOnly;
 
     return (
       <main>
-        <h1>Trades</h1>
-        {sp.ok && <p role="status">✅ {sp.ok}</p>}
-        {sp.error && <p role="alert">❌ {sp.error}</p>}
-        {filterError && <p role="alert">❌ {filterError}</p>}
-        <p>
-          <Link href="/trades/new">+ New trade</Link>
-        </p>
+        <div className="page-head">
+          <h1>Journal</h1>
+          <p className="lead">
+            Every trade of <strong>{selected.name}</strong>. Net result and net R come from the
+            stats engine, in the currency each trade is quoted in.
+          </p>
+        </div>
+        {typeof sp.ok === 'string' && (
+          <p role="status" className="notice notice-ok">
+            {sp.ok}
+          </p>
+        )}
+        {typeof sp.error === 'string' && (
+          <p role="alert" className="notice notice-alert">
+            {sp.error}
+          </p>
+        )}
 
-        <form method="get">
-          <label>
-            Status{' '}
-            <select name="status" defaultValue={sp.status ?? ''}>
+        <form method="get" className="filters" aria-label="Filter the journal">
+          <div>
+            <label htmlFor="flt-status">Status</label>
+            <select id="flt-status" name="status" defaultValue={q.status ?? ''}>
               <option value="">all</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -154,102 +90,175 @@ export default guardedPage(
                 </option>
               ))}
             </select>
-          </label>{' '}
-          <label>
-            Symbol <input name="symbol" defaultValue={sp.symbol ?? ''} />
-          </label>{' '}
-          <label>
-            Account{' '}
-            <select name="account" defaultValue={sp.account ?? ''}>
+          </div>
+          <div>
+            <label htmlFor="flt-direction">Direction</label>
+            <select id="flt-direction" name="direction" defaultValue={q.direction ?? ''}>
               <option value="">all</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
+              {DIRECTIONS.map((d) => (
+                <option key={d} value={d}>
+                  {d}
                 </option>
               ))}
             </select>
-          </label>{' '}
-          <button type="submit">Filter</button> <Link href="/trades">Reset</Link>
+          </div>
+          <div>
+            <label htmlFor="flt-symbol">Symbol (contains)</label>
+            <input id="flt-symbol" name="symbol" defaultValue={q.symbol ?? ''} maxLength={30} />
+          </div>
+          <div>
+            <label htmlFor="flt-setup">Setup</label>
+            <select id="flt-setup" name="setup" defaultValue={q.setupId ?? ''}>
+              <option value="">all</option>
+              {view.setups.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="flt-override">
+              <input
+                id="flt-override"
+                type="checkbox"
+                name="override"
+                value="1"
+                defaultChecked={q.overrideOnly}
+              />{' '}
+              Overrides only
+            </label>
+          </div>
+          {q.sort !== 'created' && <input type="hidden" name="sort" value={q.sort} />}
+          {q.dir !== defaultDir(q.sort) && <input type="hidden" name="dir" value={q.dir} />}
+          <div>
+            <button type="submit">Apply</button>
+          </div>
+          {filtered && (
+            <div>
+              <Link href="/trades">Clear filters</Link>
+            </div>
+          )}
         </form>
 
-        {trades.length === 0 ? (
-          <p>No trades found.</p>
+        <p className="small">
+          {page.total} {page.total === 1 ? 'trade' : 'trades'}
+          {filtered ? ` match (of ${view.totalAll})` : ''}.{' '}
+          <Link href="/trades/new">New trade</Link>
+        </p>
+
+        {view.totalAll === 0 ? (
+          <div className="empty">
+            <h2>The journal is empty</h2>
+            <p>
+              <Link href="/trades/new">Log a first paper trade</Link>. A stop-loss is required and
+              the risk engine checks the plan first.
+            </p>
+          </div>
+        ) : page.total === 0 ? (
+          <p>No trade matches these filters.</p>
         ) : (
-          <table border={1} cellPadding={6} className="spaced-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Account</th>
-                <th>Symbol</th>
-                <th>Dir</th>
-                <th>Status</th>
-                <th>Setup</th>
-                <th>Planned entry</th>
-                <th>Stop-loss</th>
-                <th>Initial stop</th>
-                <th>Take-profit</th>
-                <th>Size</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th>Fees</th>
-                <th>Opened</th>
-                <th>Closed</th>
-                <th>Notes</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trades.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.id}</td>
-                  <td>{accountNames.get(t.accountId)}</td>
-                  <td>{t.symbol}</td>
-                  <td>{t.direction}</td>
-                  <td>{t.status}</td>
-                  <td>{t.setupId === null ? '' : setupNames.get(t.setupId)}</td>
-                  <td>{t.plannedEntry}</td>
-                  <td>{t.stopLoss}</td>
-                  <td>{t.initialStopLoss}</td>
-                  <td>{t.takeProfit}</td>
-                  <td>{t.size}</td>
-                  <td>{t.entryPrice}</td>
-                  <td>{t.exitPrice}</td>
-                  <td>
-                    {t.fees} {t.feesCurrency}
-                  </td>
-                  <td>{formatLocal(t.openedAt)}</td>
-                  <td>{formatLocal(t.closedAt)}</td>
-                  <td>
-                    {riskFlags.get(t.id)?.overridden && (
-                      <div>
-                        <strong>⚠ OVERRIDE</strong> (broke:{' '}
-                        {riskFlags.get(t.id)?.violationCodes.join(', ')}) —{' '}
-                        {riskFlags.get(t.id)?.overrideReasons.join(' | ')}
-                      </div>
-                    )}
-                    {t.planNotes}
-                    {t.reviewNotes && <div>Review: {t.reviewNotes}</div>}
-                    {t.emotion && <div>Emotion: {t.emotion}</div>}
-                    {t.screenshotPath &&
-                      (isHttpUrl(t.screenshotPath) ? (
-                        <div>
-                          <a href={t.screenshotPath} target="_blank" rel="noopener noreferrer">
-                            Screenshot
-                          </a>
-                        </div>
-                      ) : (
-                        <div>Screenshot: {t.screenshotPath}</div>
-                      ))}
-                  </td>
-                  <td>
-                    <RowActions trade={t} nowLocal={nowLocal} fresh={ctx.auth !== null} />
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <SortHeader q={q} sortKey="created">
+                    Trade
+                  </SortHeader>
+                  <SortHeader q={q} sortKey="symbol">
+                    Symbol
+                  </SortHeader>
+                  <SortHeader q={q} sortKey="status">
+                    Status
+                  </SortHeader>
+                  <th>Setup</th>
+                  <th className="num">Entry</th>
+                  <th className="num">Exit</th>
+                  <th className="num">Size</th>
+                  <SortHeader q={q} sortKey="pnl" num>
+                    Net result
+                  </SortHeader>
+                  <SortHeader q={q} sortKey="r" num>
+                    Net R
+                  </SortHeader>
+                  <SortHeader q={q} sortKey="date">
+                    Date (UTC)
+                  </SortHeader>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {page.items.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <Link className="row-link" href={`/trades/${r.id}`}>
+                        #{r.id}
+                      </Link>{' '}
+                      {r.overridden && <span className="badge badge-override">override</span>}
+                    </td>
+                    <td>
+                      {r.symbol} <span className="small">{r.direction}</span>
+                    </td>
+                    <td className={`status-${r.status}`}>{r.status}</td>
+                    <td>{r.setupName ?? ''}</td>
+                    <td className="num">
+                      {formatAmount(r.entryPrice ?? r.plannedEntry)}
+                      {r.entryPrice === null && <span className="small"> planned</span>}
+                    </td>
+                    <td className="num">{r.exitPrice ? formatAmount(r.exitPrice) : ''}</td>
+                    <td className="num">{formatAmount(r.size)}</td>
+                    <td className="num">
+                      {r.netPnl === null ? (
+                        r.status === 'closed' ? (
+                          <span className="na" title={r.skippedReason ?? undefined}>
+                            not calculated{r.skippedReason ? ` (${r.skippedReason})` : ''}
+                          </span>
+                        ) : (
+                          ''
+                        )
+                      ) : (
+                        <Signed value={r.netPnl} currency={r.quoteCurrency} />
+                      )}
+                    </td>
+                    <td className="num">
+                      {r.netR === null ? (
+                        r.status === 'closed' ? (
+                          <span className="na">n/a</span>
+                        ) : (
+                          ''
+                        )
+                      ) : (
+                        <SignedR value={r.netR} />
+                      )}
+                    </td>
+                    <td>{when(r)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-        <p>Prices are in each trade&apos;s quote currency. Times are your local time.</p>
+
+        {page.pages > 1 && (
+          <nav className="pager" aria-label="Pages">
+            {page.page > 1 ? (
+              <Link href={journalHref(q, { page: page.page - 1 })} rel="prev">
+                ← Previous
+              </Link>
+            ) : (
+              <span className="na">← Previous</span>
+            )}
+            <span>
+              Page {page.page} of {page.pages}
+            </span>
+            {page.page < page.pages ? (
+              <Link href={journalHref(q, { page: page.page + 1 })} rel="next">
+                Next →
+              </Link>
+            ) : (
+              <span className="na">Next →</span>
+            )}
+          </nav>
+        )}
       </main>
     );
   },

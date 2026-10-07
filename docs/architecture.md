@@ -137,6 +137,44 @@ repositories through Next.js server actions. `src/app/_lib/form.ts` and `trades/
 translate HTML form text (blank values, local time to UTC); all validation happens in the domain.
 The `/stats` page only displays what the engine returns (numbers and flags, no advice). Pages and actions get the database from the guard context, which waits for a real request so `next build` never opens a database.
 
+## Dashboard UI (module 5)
+
+The UI displays; it calculates nothing (rule 3). Where a number was missing, the engine got a
+tested function instead of the page getting arithmetic:
+
+```
+src/domain/risk/usage.ts       computeRiskUsage(context)       how much of each limit is in use
+src/domain/stats/distribution  computeRDistribution(results)    counts of trades per 0.5 R bucket
+src/domain/trades/table.ts     parse query, sort (exact decimals), paginate
+src/domain/trades/timeline.ts  the steps of a trade's life
+src/data/dashboard.ts          loadDashboard(db, account, now)  read-only: risk context + usage + stats
+src/data/journal-view.ts       listJournal / loadTradeDetail    read-only views for the journal
+src/app/_lib/*                 format.ts (sign, separators, words), chart.ts (geometry), ui.tsx, charts.tsx
+```
+
+- **Design tokens** live only in `src/app/styles/tokens.css` (colours, fonts, sizes, spacing, light and
+  dark). `base.css` styles plain HTML elements; `components.css` the components. A test fails if a raw
+  colour appears outside the tokens file. The theme (system, light, dark) and the selected account
+  are cookies set by guarded actions in `_lib/preferences.ts`; the layout only reads the theme.
+- **Shell** (`_lib/shell.tsx`, rendered by `guardedPage`): LOCALHOST ONLY banner, wordmark, PAPER
+  badge, risk status (read-only `loadRiskContext`, mapped by `_lib/status.ts`), account selector,
+  theme toggle, navigation, logout. Pages that need the account call `selectedAccount(ctx)`.
+- **Charts** are inline SVG (`_lib/charts.tsx`) with classes and presentation attributes only, a text
+  title and description, and a table of the same values. Geometry (`chart.ts`) converts engine
+  numbers to pixel positions; axis labels are the engines' own exact text.
+- **Help texts** (`_lib/help.ts`) are looked up by heading (or table row) in `docs/stats-glossary.md`
+  and `docs/risk-rules.md`. If a heading is renamed, `help.test.ts` fails; it also fails on advice
+  wording. The docs are the only source.
+- **Display rules:** profit and loss use a neutral blue and ochre pair together with a sign and a
+  word ("profit", "loss", "break-even"); no advice wording; money shown with two decimals from 1
+  upward (exact text is unchanged underneath); a figure that cannot be verified is shown as such,
+  never as zero.
+- **Tests:** formatting, chart geometry, table helpers, usage and distribution maths; rendered pages
+  are checked for inline styles, scripts, external URLs and invalid nesting; the stylesheets for
+  `url()`, `@import` and raw colours; the discovery test still covers every new page and action.
+- **Demo data:** `scripts/dev/` (`npm run dev:seed`) fills a separate DEMO database; its guard
+  refuses any file that is not named like a demo file or is the real journal.
+
 ## Authentication (module 4)
 
 Full explanation in `docs/security.md`. The structure:

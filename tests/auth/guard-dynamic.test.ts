@@ -7,6 +7,9 @@ import { accounts, riskEvents, setups, trades } from '@/data/schema';
 import { codeAt, CLIENT, dbWithOwner, PASSWORD } from '../helpers/auth';
 import { PUBLIC_ENTRIES, scanApp } from '../helpers/guard-scan';
 
+// The first import of a page loads its whole module graph, which can take a few seconds.
+vi.setConfig({ testTimeout: 30_000 });
+
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 
 // A pretend request: tests change these, the mocked Next.js functions read them.

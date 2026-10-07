@@ -8,9 +8,17 @@ type Action = (prev: SecurityFormState, formData: FormData) => Promise<SecurityF
 function Result({ state }: { state: SecurityFormState }) {
   return (
     <>
-      {state.error && <p role="alert">❌ {state.error}</p>}
-      {state.message && <p role="status">✅ {state.message}</p>}
-      {state.codes && <pre className="box">{state.codes.join('\n')}</pre>}
+      {state.error && (
+        <p role="alert" className="notice notice-alert">
+          {state.error}
+        </p>
+      )}
+      {state.message && (
+        <p role="status" className="notice notice-ok">
+          {state.message}
+        </p>
+      )}
+      {state.codes && <pre>{state.codes.join('\n')}</pre>}
     </>
   );
 }
@@ -18,7 +26,7 @@ function Result({ state }: { state: SecurityFormState }) {
 function CodeField({ fresh }: { fresh: boolean }) {
   return fresh ? (
     <p>
-      <small>🔓 A fresh code was accepted in the last 5 minutes. No code needed right now.</small>
+      <small>A fresh code was accepted in the last 5 minutes. No code needed right now.</small>
     </p>
   ) : (
     <p>

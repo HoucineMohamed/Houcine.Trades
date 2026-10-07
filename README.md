@@ -1,8 +1,8 @@
 # Houcine.Trades
 
 Private trading workspace for one user: journal, stats, risk engine, AI analyst, and later
-bots. **Modules 1 to 4 are built**: journal, stats, risk engine and **single-owner login**
-(password + authenticator code). Everything runs in **paper mode**.
+bots. **Modules 1 to 5 are built**: journal, stats, risk engine, **single-owner login**
+(password + authenticator code) and a calm **dashboard**. Everything runs in **paper mode**.
 
 > ## Login exists, but hosting does not
 >
@@ -70,6 +70,20 @@ you to type `RESET`, then sets a new password and authenticator and ends every s
 activity and sign out everywhere. Sensitive actions ask for a fresh authenticator code. All of this
 is explained in [docs/security.md](docs/security.md).
 
+## Using the app
+
+- **Dashboard** (the home page): for the account chosen in the header, your equity, today's result,
+  open trades with their risk, how much of each risk limit is in use, results per currency with a
+  small equity curve, and the last closed trades. A new user sees three steps: create an account,
+  review the risk limits, log a first paper trade.
+- **Header on every page:** the PAPER badge, any halt (for example "HALTED: manual halt"), the
+  account selector (it remembers your choice), and a theme toggle (System, Light, Dark). Under the
+  header: the LOCALHOST ONLY reminder.
+- **"What does this mean?"** next to a number opens a short explanation taken from
+  `docs/stats-glossary.md` and `docs/risk-rules.md`.
+- Profit and loss are shown in two neutral colours together with a sign (+ or −) and a word
+  (profit, loss, break-even). The app never tells you whether a result is good or bad.
+
 ## Using the journal
 
 1. **Accounts**: create a paper account (name, base currency, starting balance).
@@ -95,6 +109,37 @@ is explained in [docs/security.md](docs/security.md).
 
 Prices and amounts are stored as exact decimal text (no rounding errors). Times you type are
 your computer's local time and are stored as UTC.
+
+## Demo data (optional, a separate database)
+
+To look at a dashboard with data in it, without touching your real journal, fill a **separate demo
+database**. The command refuses to run unless `DATABASE_URL` is set to a file with `demo` in its name
+(for example `data/demo.db`), it refuses your real journal file, and it prints which file it uses.
+Everything it creates is marked DEMO ("DEMO Paper Account"). The demo file is ignored by git.
+
+macOS or Linux:
+
+```
+export DATABASE_URL=file:./data/demo.db
+npm run dev:seed            # creates the DEMO account and made-up trades (it prints the file it uses)
+npm run auth:create-owner   # the demo file needs its own owner (same AUTH_SECRET from .env)
+npm run dev                 # open http://127.0.0.1:3000 and sign in
+```
+
+Windows PowerShell:
+
+```
+$env:DATABASE_URL = "file:./data/demo.db"
+npm run dev:seed
+npm run auth:create-owner
+npm run dev
+```
+
+The setting only lasts for that terminal window. When you are done, close the window (or run
+`unset DATABASE_URL`, PowerShell: `Remove-Item Env:DATABASE_URL`) and start the app again in a normal
+window to use your real journal. To start the demo again, delete `data/demo.db` and repeat. A demo
+file that already has accounts or an owner is never seeded (do the steps in the order above: seed
+first, then create the owner).
 
 ## Database and migrations
 

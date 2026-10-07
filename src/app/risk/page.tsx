@@ -1,5 +1,6 @@
+import Link from 'next/link';
 import type { Db } from '@/data/client';
-import { listAccounts } from '@/data/accounts';
+import type { Account } from '@/data/accounts';
 import { formatRemaining, getRiskSettingsView, syncRiskState } from '@/data/risk';
 import { listRiskEvents } from '@/data/risk-events';
 import {
@@ -9,13 +10,17 @@ import {
   riskFieldLabel,
   type RiskField,
 } from '@/domain/risk';
+import { computeRiskUsage } from '@/domain/risk';
+import { selectedAccount } from '../_lib/account';
+import { formatMoney, formatUtc } from '../_lib/format';
 import { guardedPage } from '../_lib/guard';
+import { Help } from '../_lib/Help';
+import { CountMeter, MetricTile, Signed, UsageMeter } from '../_lib/ui';
 import { StepUpField } from '../_lib/StepUpField';
-import { formatLocal, toId } from '../_lib/form';
+import { formatLocal } from '../_lib/form';
 import { haltAction, resetAction, restoreDefaultsAction, updateSettingsAction } from './actions';
 
 interface SearchParams {
-  account?: string;
   ok?: string;
   error?: string;
   direction?: string;
@@ -42,31 +47,40 @@ const blank = (v: string | undefined) => (v === undefined || v.trim() === '' ? n
 export default guardedPage(
   async (ctx, { searchParams }: { searchParams: Promise<SearchParams> }) => {
     const sp = await searchParams;
-    const db = ctx.db;
-    const accounts = listAccounts(db);
-    const account = accounts.find((a) => a.id === (toId(sp.account) ?? accounts[0]?.id));
-    const now = new Date();
-
+    const { selected } = await selectedAccount(ctx);
     return (
       <main>
-        <h1>Risk</h1>
-        <p>
-          Your safety rules, enforced by tested code. The engine has the final say: a plan that
-          breaks a limit is refused with reasons. Every rule is explained in{' '}
-          <code>docs/risk-rules.md</code>.
-        </p>
-        {sp.ok && <p role="status">✅ {sp.ok}</p>}
-        {sp.error && <p role="alert">❌ {sp.error}</p>}
-
-        {accounts.length === 0 || !account ? (
-          <p>No account yet. Create one in Accounts first.</p>
+        <div className="page-head">
+          <h1>Risk</h1>
+          <p className="lead">
+            Your safety rules, enforced by tested code. The engine has the final say: a plan that
+            breaks a limit is refused with reasons.
+          </p>
+        </div>
+        {sp.ok && (
+          <p role="status" className="notice notice-ok">
+            {sp.ok}
+          </p>
+        )}
+        {sp.error && (
+          <p role="alert" className="notice notice-alert">
+            {sp.error}
+          </p>
+        )}
+        {!selected ? (
+          <div className="empty">
+            <h2>No account yet</h2>
+            <p>
+              <Link href="/accounts">Create a paper account</Link> first. Its risk limits start with
+              default values.
+            </p>
+          </div>
         ) : (
           <AccountRisk
             sp={sp}
-            accounts={accounts}
-            accountId={account.id}
-            now={now}
-            db={db}
+            account={selected}
+            now={ctx.now}
+            db={ctx.db}
             fresh={ctx.auth !== null}
           />
         )}
@@ -77,23 +91,23 @@ export default guardedPage(
 
 function AccountRisk({
   sp,
-  accounts,
-  accountId,
+  account,
   now,
   db,
   fresh,
 }: {
   sp: SearchParams;
-  accounts: ReturnType<typeof listAccounts>;
-  accountId: number;
+  account: Account;
   now: Date;
   db: Db;
   fresh: boolean;
 }) {
+  const accountId = account.id;
   const ctx = syncRiskState(db, accountId, now); // also records halts that were detected but not yet logged
   const view = getRiskSettingsView(db, accountId, now);
   const events = listRiskEvents(db, accountId, 50);
-  const account = accounts.find((a) => a.id === accountId)!;
+  const usage = computeRiskUsage(ctx);
+  const base = account.baseCurrency;
   const manualHalted = ctx.halts.some((h) => h.kind === 'manual');
 
   const calc =
@@ -113,349 +127,413 @@ function AccountRisk({
 
   return (
     <>
-      <form method="get">
-        <label>
-          Account{' '}
-          <select name="account" defaultValue={String(accountId)}>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} ({a.baseCurrency})
-              </option>
-            ))}
-          </select>
-        </label>{' '}
-        <button type="submit">Show</button>
-      </form>
-
-      <h2>Trading status</h2>
-      {ctx.halts.length === 0 ? (
-        <p>✅ Trading is NOT halted.</p>
-      ) : (
-        ctx.halts.map((h) => (
-          <div key={h.kind} role="alert" className="box box-halt">
-            <p>
-              <strong>🛑 HALTED ({h.kind.replace('_', ' ')})</strong>
-            </p>
-            <p>{h.message}</p>
-            {h.since && <p>Began: {formatLocal(h.since)} (local time)</p>}
-            {h.clearsAt && <p>Clears by itself at {h.clearsAt} (next UTC midnight).</p>}
-            {h.kind === 'drawdown' && (
-              <p>
-                {h.resetAllowedNow ? (
-                  <strong>The 24 hours have passed: you can reset it now.</strong>
-                ) : (
-                  <>
-                    <strong>Reset not possible yet.</strong> Time remaining:{' '}
-                    <strong>{formatRemaining(h.resetRemainingMs ?? 0)}</strong> (available at{' '}
-                    {h.resetAvailableAt}). Trying earlier is refused and logged.
-                  </>
-                )}
-              </p>
-            )}
-            {(h.kind === 'manual' || h.kind === 'drawdown') && (
-              <form action={resetAction}>
-                <input type="hidden" name="accountId" value={accountId} />
-                <input type="hidden" name="haltKind" value={h.kind} />
-                <p>
-                  <label>
-                    Type RESET <input name="confirm" autoComplete="off" />
-                  </label>{' '}
-                  <label>
-                    Reason (at least 10 characters){' '}
-                    <input name="reason" size={50} autoComplete="off" />
-                  </label>{' '}
-                  <button type="submit">Reset this halt</button>
-                </p>
-                <StepUpField fresh={fresh} />
-                {h.kind === 'drawdown' && (
-                  <p>
-                    <small>
-                      A reset makes your current equity the new baseline: the drawdown limit is
-                      measured from there afterwards.
-                    </small>
-                  </p>
-                )}
-              </form>
-            )}
-          </div>
-        ))
-      )}
-
-      {!manualHalted && (
-        <form action={haltAction}>
-          <input type="hidden" name="accountId" value={accountId} />
-          <p>
-            <strong>Kill switch:</strong>{' '}
-            <label>
-              Reason <input name="reason" size={40} maxLength={500} autoComplete="off" />
-            </label>{' '}
-            <button type="submit">HALT TRADING NOW</button>
-          </p>
-        </form>
-      )}
-
-      <h2>Equity and today</h2>
-      {ctx.equity === null ? (
-        <p role="alert">
-          ❌ Equity cannot be verified, so every plan is refused: {ctx.equityProblem}
-        </p>
-      ) : (
-        <table border={1} cellPadding={6}>
-          <tbody>
-            <tr>
-              <th align="left">Current equity ({account.baseCurrency})</th>
-              <td>{ctx.equity}</td>
-            </tr>
-            <tr>
-              <th align="left">Peak equity since the last baseline</th>
-              <td>{ctx.peakEquity}</td>
-            </tr>
-            <tr>
-              <th align="left">Fall from that peak</th>
-              <td>{ctx.fallFromPeak}</td>
-            </tr>
-            <tr>
-              <th align="left">Drawdown baseline</th>
-              <td>{ctx.baselineEquity}</td>
-            </tr>
-            <tr>
-              <th align="left">Equity at the start of today (UTC)</th>
-              <td>{ctx.dayStartEquity ?? `n/a (${ctx.dayStartProblem})`}</td>
-            </tr>
-            <tr>
-              <th align="left">Net realised P&amp;L counted as today</th>
-              <td>{ctx.todayNetPnl}</td>
-            </tr>
-            <tr>
-              <th align="left">UTC day started</th>
-              <td>{ctx.dayStart}</td>
-            </tr>
-            <tr>
-              <th align="left">Open trades</th>
-              <td>{ctx.openTrades.length}</td>
-            </tr>
-          </tbody>
-        </table>
-      )}
-      <p>
-        <small>
-          Equity = starting balance + net realised P&amp;L (from the stats engine). Unrealised
-          P&amp;L of open trades is NOT counted (no live prices yet). The day boundary is UTC
-          midnight. A closed trade counts as today if its closed time OR the time it was recorded as
-          closed is today.
-        </small>
-      </p>
-      {ctx.tradesWithExcludedFees > 0 && (
-        <p role="status">
-          ⚠️ {ctx.tradesWithExcludedFees} closed trade(s) had fees in another currency that were not
-          deducted, so equity may be slightly too high.
-        </p>
-      )}
-
-      <h2>Settings</h2>
-      {view.problem ? (
-        <div role="alert">
-          <p>❌ The stored risk settings are damaged, so every plan is refused: {view.problem}</p>
-          <form action={restoreDefaultsAction}>
-            <input type="hidden" name="accountId" value={accountId} />
-            <p>
-              <label>
-                Type RESET <input name="confirm" autoComplete="off" />
-              </label>{' '}
-              <label>
-                Reason <input name="reason" size={50} autoComplete="off" />
-              </label>{' '}
-              <button type="submit">Restore the default settings</button>
-            </p>
-            <StepUpField fresh={fresh} />
-          </form>
+      <section aria-labelledby="status-title">
+        <div className="section-head">
+          <h2 id="status-title">Trading status</h2>
+          <Help id="halts" />
         </div>
-      ) : (
-        <>
-          <p>
-            Making a limit <strong>tighter</strong> applies immediately. Making it{' '}
-            <strong>looser</strong> takes effect only after <strong>24 hours</strong>. Values above
-            the hard ceilings are rejected.
+        {ctx.halts.length === 0 ? (
+          <p className="notice notice-ok">
+            No halt is active. New plans are checked against the limits below.
           </p>
-          <form action={updateSettingsAction}>
+        ) : (
+          ctx.halts.map((h) => (
+            <div key={h.kind} role="alert" className="halt-box">
+              <p>
+                <strong>HALTED ({h.kind.replace('_', ' ')})</strong>
+              </p>
+              <p>{h.message}</p>
+              {h.since && <p>Began: {formatLocal(h.since)} (local time)</p>}
+              {h.clearsAt && (
+                <p>Clears by itself at {formatUtc(h.clearsAt)} (next UTC midnight).</p>
+              )}
+              {h.kind === 'drawdown' && (
+                <p>
+                  {h.resetAllowedNow ? (
+                    <strong>The 24 hours have passed: the halt can be reset now.</strong>
+                  ) : (
+                    <>
+                      <strong>Reset not possible yet.</strong> Time remaining:{' '}
+                      <strong>{formatRemaining(h.resetRemainingMs ?? 0)}</strong> (available at{' '}
+                      {formatUtc(h.resetAvailableAt)}). An earlier attempt is refused and logged.{' '}
+                      <Help id="drawdownDetails" />
+                    </>
+                  )}
+                </p>
+              )}
+              {(h.kind === 'manual' || h.kind === 'drawdown') && (
+                <form action={resetAction}>
+                  <input type="hidden" name="accountId" value={accountId} />
+                  <input type="hidden" name="haltKind" value={h.kind} />
+                  <div className="form-grid">
+                    <div className="field">
+                      <label htmlFor={`reset-confirm-${h.kind}`}>Type RESET</label>
+                      <input id={`reset-confirm-${h.kind}`} name="confirm" autoComplete="off" />
+                    </div>
+                    <div className="field wide">
+                      <label htmlFor={`reset-reason-${h.kind}`}>
+                        Reason (at least 10 characters)
+                      </label>
+                      <input id={`reset-reason-${h.kind}`} name="reason" autoComplete="off" />
+                    </div>
+                  </div>
+                  <StepUpField fresh={fresh} />
+                  <p>
+                    <button type="submit">Reset this halt</button>
+                  </p>
+                  {h.kind === 'drawdown' && (
+                    <p className="small">
+                      A reset makes the current equity the new baseline: the drawdown limit is
+                      measured from there afterwards.
+                    </p>
+                  )}
+                </form>
+              )}
+            </div>
+          ))
+        )}
+
+        {!manualHalted && (
+          <form action={haltAction} className="panel">
             <input type="hidden" name="accountId" value={accountId} />
-            <table border={1} cellPadding={6}>
+            <div className="panel-title">
+              <h3>Kill switch</h3>
+            </div>
+            <p className="small">
+              Stops every new plan at once. One click, no code needed. A reset needs a typed word, a
+              reason and a fresh authenticator code.
+            </p>
+            <div className="form-grid">
+              <div className="field wide">
+                <label htmlFor="halt-reason">Reason</label>
+                <input id="halt-reason" name="reason" maxLength={500} autoComplete="off" />
+              </div>
+            </div>
+            <button type="submit" className="danger">
+              Halt trading now
+            </button>
+          </form>
+        )}
+      </section>
+
+      <section aria-labelledby="usage-title">
+        <div className="section-head">
+          <h2 id="usage-title">Limits in use</h2>
+        </div>
+        <div className="panel">
+          <div className="meter-grid">
+            <UsageMeter
+              name="Daily loss"
+              line={usage.dailyLoss}
+              currency={base}
+              help="haltHit"
+              measuredAgainst="the equity at the start of the UTC day"
+            />
+            <UsageMeter
+              name="Open risk"
+              line={usage.openRisk}
+              currency={base}
+              help="ruleOpenRisk"
+              measuredAgainst="current equity"
+            />
+            <CountMeter name="Open trades" usage={usage.openTrades} help="ruleOpenTrades" />
+            <UsageMeter
+              name="Drawdown"
+              line={usage.drawdown}
+              currency={base}
+              help="drawdownDetails"
+              measuredAgainst="the highest equity since the last baseline"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="equity-title">
+        <div className="section-head">
+          <h2 id="equity-title">Equity and today</h2>
+          <Help id="equity" />
+        </div>
+        {ctx.equity === null ? (
+          <p role="alert" className="notice notice-alert">
+            Equity cannot be verified, so every plan is refused: {ctx.equityProblem}
+          </p>
+        ) : (
+          <div className="panel">
+            <div className="grid grid-tight">
+              <MetricTile label={`Current equity (${base})`} small>
+                {formatMoney(ctx.equity)}
+              </MetricTile>
+              <MetricTile label={`Peak since the last baseline (${base})`} small>
+                {ctx.peakEquity ? formatMoney(ctx.peakEquity) : 'n/a'}
+              </MetricTile>
+              <MetricTile label={`Fall from that peak (${base})`} small>
+                {ctx.fallFromPeak ? formatMoney(ctx.fallFromPeak) : 'n/a'}
+              </MetricTile>
+              <MetricTile label={`Drawdown baseline (${base})`} small>
+                {ctx.baselineEquity ? formatMoney(ctx.baselineEquity) : 'n/a'}
+              </MetricTile>
+              <MetricTile label={`Equity at the start of today (${base}, UTC)`} help="utcDay" small>
+                {ctx.dayStartEquity
+                  ? formatMoney(ctx.dayStartEquity)
+                  : `n/a (${ctx.dayStartProblem})`}
+              </MetricTile>
+              <MetricTile label="Net result counted as today" small>
+                <Signed value={ctx.todayNetPnl} currency={base} />
+              </MetricTile>
+              <MetricTile label="Open trades" small>
+                {ctx.openTrades.length}
+              </MetricTile>
+            </div>
+            <p className="small">
+              UTC day started {formatUtc(ctx.dayStart)}. Unrealised results of open trades are not
+              counted (no live prices).
+            </p>
+          </div>
+        )}
+        {ctx.tradesWithExcludedFees > 0 && (
+          <p role="status" className="notice notice-note">
+            {ctx.tradesWithExcludedFees} closed trade(s) had fees in another currency that were not
+            deducted, so equity may be slightly too high.
+          </p>
+        )}
+      </section>
+
+      <section aria-labelledby="settings-title">
+        <div className="section-head">
+          <h2 id="settings-title">Limits</h2>
+          <Help id="loosening" label="Tighter now, looser after 24 hours: what does this mean?" />
+          <Help id="ceilings" label="Hard ceilings" />
+        </div>
+        {view.problem ? (
+          <div role="alert" className="notice notice-alert">
+            <p>The stored risk settings are damaged, so every plan is refused: {view.problem}</p>
+            <form action={restoreDefaultsAction}>
+              <input type="hidden" name="accountId" value={accountId} />
+              <div className="form-grid">
+                <div className="field">
+                  <label htmlFor="restore-confirm">Type RESET</label>
+                  <input id="restore-confirm" name="confirm" autoComplete="off" />
+                </div>
+                <div className="field wide">
+                  <label htmlFor="restore-reason">Reason</label>
+                  <input id="restore-reason" name="reason" autoComplete="off" />
+                </div>
+              </div>
+              <StepUpField fresh={fresh} />
+              <button type="submit">Restore the default settings</button>
+            </form>
+          </div>
+        ) : (
+          <form action={updateSettingsAction} className="panel">
+            <input type="hidden" name="accountId" value={accountId} />
+            <p>
+              Making a limit <strong>tighter</strong> applies immediately. Making it{' '}
+              <strong>looser</strong> takes effect only after <strong>24 hours</strong> and needs a
+              fresh authenticator code. Values above the hard ceilings are rejected.
+            </p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Limit</th>
+                    <th className="num">In force now</th>
+                    <th>Pending (looser)</th>
+                    <th>Hard ceiling</th>
+                    <th>New value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {RISK_FIELDS.map((f) => {
+                    const pending = view.pending[f];
+                    return (
+                      <tr key={f}>
+                        <th scope="row">
+                          <label htmlFor={`set-${f}`}>{riskFieldLabel(f)}</label>
+                        </th>
+                        <td className="num">{String(view.effective?.[f])}</td>
+                        <td>
+                          {pending
+                            ? `${pending.value} from ${pending.effectiveAt} (in ${formatRemaining(Math.max(0, new Date(pending.effectiveAt).getTime() - now.getTime()))})`
+                            : 'none'}
+                        </td>
+                        <td>
+                          {f === 'minRewardToRisk'
+                            ? 'none (warning only), ' + CEILING[f]
+                            : CEILING[f]}
+                        </td>
+                        <td>
+                          <input
+                            id={`set-${f}`}
+                            name={f}
+                            defaultValue={String(view.active?.[f])}
+                            size={8}
+                            inputMode="decimal"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <StepUpField fresh={fresh} />
+            <p>
+              <button type="submit">Save limits</button>
+            </p>
+          </form>
+        )}
+      </section>
+
+      <section aria-labelledby="calc-title">
+        <div className="section-head">
+          <h2 id="calc-title">Position-size calculator</h2>
+          <Help id="sizeCalculator" />
+        </div>
+        <form method="get" className="panel">
+          <div className="form-grid">
+            <div className="field">
+              <label htmlFor="calc-direction">Direction</label>
+              <select id="calc-direction" name="direction" defaultValue={sp.direction ?? 'long'}>
+                <option>long</option>
+                <option>short</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="calc-entry">Entry</label>
+              <input
+                id="calc-entry"
+                name="entry"
+                defaultValue={sp.entry ?? ''}
+                inputMode="decimal"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="calc-stop">Stop-loss</label>
+              <input id="calc-stop" name="stop" defaultValue={sp.stop ?? ''} inputMode="decimal" />
+            </div>
+            <div className="field">
+              <label htmlFor="calc-target">Target (optional)</label>
+              <input
+                id="calc-target"
+                name="target"
+                defaultValue={sp.target ?? ''}
+                inputMode="decimal"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="calc-risk">Risk % (blank = your limit)</label>
+              <input id="calc-risk" name="risk" defaultValue={sp.risk ?? ''} inputMode="decimal" />
+            </div>
+            <div className="field">
+              <label htmlFor="calc-step">Size step</label>
+              <input id="calc-step" name="step" defaultValue={sp.step ?? ''} inputMode="decimal" />
+            </div>
+            <div className="field">
+              <label htmlFor="calc-min">Minimum size</label>
+              <input id="calc-min" name="min" defaultValue={sp.min ?? ''} inputMode="decimal" />
+            </div>
+            <div className="field">
+              <label htmlFor="calc-fee">Estimated fees % (round trip)</label>
+              <input id="calc-fee" name="fee" defaultValue={sp.fee ?? ''} inputMode="decimal" />
+            </div>
+          </div>
+          <button type="submit">Calculate</button>
+        </form>
+        {calc &&
+          (calc.ok ? (
+            <div className="table-wrap">
+              <table>
+                <tbody>
+                  <tr>
+                    <th scope="row">Size</th>
+                    <td>
+                      <strong>{calc.size}</strong>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Risk budget</th>
+                    <td>{calc.riskBudget}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Money at risk if the stop is hit</th>
+                    <td>{calc.riskAmount}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Estimated fees</th>
+                    <td>{calc.estimatedFees}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Risk used (% of equity, rounded up)</th>
+                    <td>{calc.riskPercentUsed}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Trade value (size × entry)</th>
+                    <td>{calc.notional}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Reward-to-risk</th>
+                    <td>{calc.rewardToRisk ?? 'no target given'}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div role="alert" className="notice notice-alert">
+              <p>No size can be calculated:</p>
+              <ul>
+                {calc.problems.map((p) => (
+                  <li key={p.code + p.message}>{p.message}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+      </section>
+
+      <section aria-labelledby="events-title">
+        <div className="section-head">
+          <h2 id="events-title">Recent risk events (newest first)</h2>
+        </div>
+        {events.length === 0 ? (
+          <p className="small">No events yet.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
               <thead>
                 <tr>
-                  <th>Setting</th>
-                  <th>In force now</th>
-                  <th>Pending (looser)</th>
-                  <th>Hard ceiling</th>
-                  <th>New value</th>
+                  <th>#</th>
+                  <th>Time (local)</th>
+                  <th>Event</th>
+                  <th>Halt</th>
+                  <th>Trade</th>
+                  <th>Reason</th>
+                  <th>Details</th>
                 </tr>
               </thead>
               <tbody>
-                {RISK_FIELDS.map((f) => {
-                  const pending = view.pending[f];
-                  return (
-                    <tr key={f}>
-                      <td>{riskFieldLabel(f)}</td>
-                      <td>{String(view.effective?.[f])}</td>
-                      <td>
-                        {pending
-                          ? `${pending.value} from ${pending.effectiveAt} (in ${formatRemaining(Math.max(0, new Date(pending.effectiveAt).getTime() - now.getTime()))})`
-                          : '-'}
-                      </td>
-                      <td>
-                        {f === 'minRewardToRisk'
-                          ? 'none (warning only), ' + CEILING[f]
-                          : CEILING[f]}
-                      </td>
-                      <td>
-                        <input
-                          name={f}
-                          defaultValue={String(view.active?.[f])}
-                          size={8}
-                          inputMode="decimal"
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
+                {events.map((e) => (
+                  <tr key={e.id}>
+                    <td>{e.id}</td>
+                    <td>{formatLocal(e.createdAt)}</td>
+                    <td>{e.kind}</td>
+                    <td>{e.haltKind ?? ''}</td>
+                    <td>
+                      {e.tradeId ? <Link href={`/trades/${e.tradeId}`}>#{e.tradeId}</Link> : ''}
+                    </td>
+                    <td>{e.reason}</td>
+                    <td>
+                      <small>
+                        {e.detailsJson.length > 160
+                          ? e.detailsJson.slice(0, 160) + '…'
+                          : e.detailsJson}
+                      </small>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-            <StepUpField fresh={fresh} />
-            <p>
-              <button type="submit">Save settings</button>
-            </p>
-          </form>
-        </>
-      )}
-
-      <h2>Position-size calculator</h2>
-      <p>
-        Size = (equity × risk %) ÷ (distance to the stop), always rounded <strong>down</strong>.
-        Fees are an estimate of the whole round trip as a percent of the trade value.
-      </p>
-      <form method="get">
-        <input type="hidden" name="account" value={accountId} />
-        <p>
-          <label>
-            Direction{' '}
-            <select name="direction" defaultValue={sp.direction ?? 'long'}>
-              <option>long</option>
-              <option>short</option>
-            </select>
-          </label>{' '}
-          <label>
-            Entry <input name="entry" defaultValue={sp.entry ?? ''} size={10} inputMode="decimal" />
-          </label>{' '}
-          <label>
-            Stop-loss{' '}
-            <input name="stop" defaultValue={sp.stop ?? ''} size={10} inputMode="decimal" />
-          </label>{' '}
-          <label>
-            Target (optional){' '}
-            <input name="target" defaultValue={sp.target ?? ''} size={10} inputMode="decimal" />
-          </label>
-        </p>
-        <p>
-          <label>
-            Risk % (blank = your limit){' '}
-            <input name="risk" defaultValue={sp.risk ?? ''} size={6} inputMode="decimal" />
-          </label>{' '}
-          <label>
-            Size step{' '}
-            <input name="step" defaultValue={sp.step ?? ''} size={8} inputMode="decimal" />
-          </label>{' '}
-          <label>
-            Minimum size{' '}
-            <input name="min" defaultValue={sp.min ?? ''} size={8} inputMode="decimal" />
-          </label>{' '}
-          <label>
-            Estimated fees % (round trip){' '}
-            <input name="fee" defaultValue={sp.fee ?? ''} size={6} inputMode="decimal" />
-          </label>
-        </p>
-        <button type="submit">Calculate</button>
-      </form>
-      {calc &&
-        (calc.ok ? (
-          <table border={1} cellPadding={6}>
-            <tbody>
-              <tr>
-                <th align="left">Size</th>
-                <td>
-                  <strong>{calc.size}</strong>
-                </td>
-              </tr>
-              <tr>
-                <th align="left">Risk budget</th>
-                <td>{calc.riskBudget}</td>
-              </tr>
-              <tr>
-                <th align="left">Money at risk if the stop is hit</th>
-                <td>{calc.riskAmount}</td>
-              </tr>
-              <tr>
-                <th align="left">Estimated fees</th>
-                <td>{calc.estimatedFees}</td>
-              </tr>
-              <tr>
-                <th align="left">Risk used (% of equity, rounded up)</th>
-                <td>{calc.riskPercentUsed}</td>
-              </tr>
-              <tr>
-                <th align="left">Trade value (size × entry)</th>
-                <td>{calc.notional}</td>
-              </tr>
-              <tr>
-                <th align="left">Reward-to-risk</th>
-                <td>{calc.rewardToRisk ?? 'no target given'}</td>
-              </tr>
-            </tbody>
-          </table>
-        ) : (
-          <div role="alert">
-            <p>❌ No size can be calculated:</p>
-            <ul>
-              {calc.problems.map((p) => (
-                <li key={p.code + p.message}>{p.message}</li>
-              ))}
-            </ul>
           </div>
-        ))}
-
-      <h2>Recent risk events (newest first)</h2>
-      {events.length === 0 ? (
-        <p>No events yet.</p>
-      ) : (
-        <table border={1} cellPadding={6}>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Time (local)</th>
-              <th>Event</th>
-              <th>Halt</th>
-              <th>Trade</th>
-              <th>Reason</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((e) => (
-              <tr key={e.id}>
-                <td>{e.id}</td>
-                <td>{formatLocal(e.createdAt)}</td>
-                <td>{e.kind}</td>
-                <td>{e.haltKind ?? ''}</td>
-                <td>{e.tradeId ?? ''}</td>
-                <td>{e.reason}</td>
-                <td>
-                  <small>
-                    {e.detailsJson.length > 160 ? e.detailsJson.slice(0, 160) + '…' : e.detailsJson}
-                  </small>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        )}
+      </section>
     </>
   );
 }

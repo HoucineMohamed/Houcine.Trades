@@ -30,7 +30,11 @@ export default publicPage(async (ctx, props: { searchParams: Promise<SearchParam
         Private workspace. Sign in with your password and the 6-digit code from your authenticator
         app.
       </p>
-      {problem && <p role="alert">❌ {problem}</p>}
+      {problem && (
+        <p role="alert" className="notice notice-alert">
+          {problem}
+        </p>
+      )}
       <form action={loginAction}>
         <p>
           <label>
