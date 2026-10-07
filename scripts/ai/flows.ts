@@ -48,7 +48,7 @@ export function withKey(existing: string | null, key: string): string {
   return out.join(eol) + eol;
 }
 
-function writeSecretFile(file: string, text: string): void {
+export function writeSecretFile(file: string, text: string): void {
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     fs.rmSync(tmp, { force: true }); // a stale file from an earlier run keeps its old permissions
