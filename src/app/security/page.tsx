@@ -18,6 +18,9 @@ const EVENT_LABELS: Record<string, string> = {
   rate_limit_tripped: 'Rate limit started',
   owner_created: 'Owner created',
   owner_reset: 'Owner reset (command line)',
+  ai_consent_on: 'Analyst: "Send journal data to the AI" switched ON',
+  ai_consent_off: 'Analyst: "Send journal data to the AI" switched OFF',
+  ai_caps_changed: 'Analyst: spend caps changed',
 };
 
 export default guardedPage(

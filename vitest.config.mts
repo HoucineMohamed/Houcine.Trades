@@ -9,5 +9,10 @@ export default defineConfig({
       'server-only': path.resolve(import.meta.dirname, 'tests/helpers/empty.ts'),
     },
   },
-  test: { environment: 'node', include: ['tests/**/*.test.ts', 'src/**/*.test.ts'] },
+  test: {
+    environment: 'node',
+    include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
+    // no test may reach the network (see the file)
+    setupFiles: ['tests/helpers/no-network.ts'],
+  },
 });

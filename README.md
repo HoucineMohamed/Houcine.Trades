@@ -180,6 +180,13 @@ CI fails if the schema changed without a committed migration.
 | `npm run auth:generate-secret` | print a random `AUTH_SECRET`                                   |
 | `npm run auth:create-owner`    | create the one owner (password, authenticator, recovery codes) |
 | `npm run auth:reset`           | reset the owner's password and authenticator                   |
+| `npm run ai:set-key`           | put the analyst's API key into `.env` (hidden input)           |
+
+## The analyst (optional)
+
+An AI that reviews and explains your journal (plan review, weekly review, tutor). It is off until you
+add a key and switch it on. Step-by-step setup, costs and safety: [docs/analyst.md](docs/analyst.md).
+The app works the same without it.
 
 ## Safety notes
 

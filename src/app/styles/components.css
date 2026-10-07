@@ -700,3 +700,33 @@ th.num {
 .metric > .help {
   margin-top: var(--space-1);
 }
+
+/* analyst (module 6): model text is shown as plain, escaped text that keeps its line breaks */
+.ai-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0 0 var(--space-3);
+}
+.ai-section {
+  margin-bottom: var(--space-4);
+}
+.ai-section h3 {
+  margin-bottom: var(--space-2);
+}
+.ai-list {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+.ai-list li {
+  margin-bottom: var(--space-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-figures {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+.ai-figures li {
+  margin-bottom: var(--space-1);
+}

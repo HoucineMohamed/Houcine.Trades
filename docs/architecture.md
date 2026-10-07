@@ -10,7 +10,8 @@ src/
   auth/           server-only auth code: crypto, TOTP, sessions, services (impure)
   domain/         pure logic: risk/, stats/, auth/ (rules only)
   data/           SQLite + Drizzle
-  integrations/   tradingview-mcp/, exchanges/
+  analyst/        server-only analyst service: gates, one request at a time, input loaders
+  integrations/   anthropic/ (the AI client), tradingview-mcp/, exchanges/
   bots/           future bots framework
   config/         env validation, paper-mode guard
 ```
@@ -200,6 +201,29 @@ Full explanation in `docs/security.md`. The structure:
   `assertFreshAuth`. Only `src/auth` may create one (ESLint).
 - Command-line scripts in `scripts/auth/` (run with `tsx --conditions=react-server`) create and
   reset the owner; there is no web equivalent.
+
+## Analyst (module 6)
+
+Full plain-language description in `docs/analyst.md`. In short:
+
+- `src/domain/analyst/` is pure: the price table (with a last-verified date), spend caps (defaults,
+  ceilings, tighten-now / loosen-after-24-hours), the prompt builder (untrusted text is scrubbed,
+  cut, quoted line by line and delimited), the output schema (zod), the cited-figure check and the
+  instruction-wording check.
+- `src/integrations/anthropic/` holds the one interface (`AnalystClient`, text in and text out, no
+  tools), the `fetch` implementation (fixed URL, no retries, the key only in a header) and lazy env
+  validation (`ANTHROPIC_API_KEY`, `ANALYST_MODEL`). Tests use a fake client with the same interface.
+- `src/analyst/` (new layer: `app -> analyst -> data, domain, integrations`) is the only code that
+  calls the client. `runAnalyst` checks every gate BEFORE anything leaves the computer (key, settings,
+  privacy switch, stored answer, price, usage log, caps), runs ONE request at a time, decides the final
+  status, then writes the usage row and the review in one transaction. The input loaders only copy
+  engine results; the plan verdict is always recomputed on the server.
+- Tables `ai_settings` (one row: privacy switch, caps, pending caps), `ai_usage` (append-only, never
+  prompts or answers) and `ai_reviews` (append-only validated answers). Consent and cap changes are
+  logged in `auth_events` (migration 0004 rebuilt that table to allow the new kinds and re-created
+  its triggers).
+- The analyst can never reach the risk engine, the settings writers or an order: a test checks the
+  analyst code does not import them, and the model call has no tools.
 
 ## Data and hosting
 

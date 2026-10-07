@@ -93,7 +93,11 @@ describe('no real-looking secret is committed', () => {
     const secretLines = text
       .split('\n')
       .filter((l) => /^\s*[A-Z_]*(SECRET|KEY|TOKEN|PASSWORD)[A-Z_]*\s*=/.test(l));
-    for (const line of secretLines) expect(line).toContain(PLACEHOLDER);
+    // a secret line is either the documented placeholder or EMPTY (the analyst key is set by a script)
+    for (const line of secretLines) {
+      const value = line.slice(line.indexOf('=') + 1).trim();
+      expect(value === '' || line.includes(PLACEHOLDER), line).toBe(true);
+    }
   });
 });
 

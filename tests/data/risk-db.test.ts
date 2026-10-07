@@ -8,6 +8,11 @@ import { closedTrade, riskDb } from '../helpers/risk';
 
 /** Every trigger created by the hand-written parts of the migrations (0001, 0002, 0003). */
 export const ALL_TRIGGERS = [
+  'ai_reviews_no_delete',
+  'ai_reviews_no_update',
+  'ai_settings_no_delete',
+  'ai_usage_no_delete',
+  'ai_usage_no_update',
   'auth_events_no_delete',
   'auth_events_no_update',
   'owner_id_frozen',
