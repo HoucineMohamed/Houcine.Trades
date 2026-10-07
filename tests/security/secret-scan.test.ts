@@ -26,6 +26,7 @@ const RULES: Rule[] = [
   },
   { name: 'Slack token', pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/ },
   { name: 'Anthropic / OpenAI style key', pattern: /\bsk-(?:ant-)?[A-Za-z0-9_-]{32,}\b/ },
+  { name: 'Telegram bot token', pattern: /\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/ },
   { name: 'Google API key', pattern: /\bAIza[0-9A-Za-z_-]{35}\b/ },
   {
     name: 'JSON web token',
