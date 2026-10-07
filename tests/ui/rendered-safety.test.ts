@@ -106,6 +106,7 @@ const PAGES: {
   { route: '/analyst', file: 'src/app/analyst/page.tsx' },
   { route: '/analyst/review', file: 'src/app/analyst/review/page.tsx' },
   { route: '/analyst/tutor', file: 'src/app/analyst/tutor/page.tsx' },
+  { route: '/notifications', file: 'src/app/notifications/page.tsx' },
   { route: '/accounts', file: 'src/app/accounts/page.tsx' },
   { route: '/setups', file: 'src/app/setups/page.tsx' },
   { route: '/security', file: 'src/app/security/page.tsx' },

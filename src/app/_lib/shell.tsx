@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { getEnv } from '@/config/env';
+import { getHealthInput, getNotificationSettings } from '@/data/notifications';
 import { loadRiskContext } from '@/data/risk';
+import { alertHealth } from '@/domain/notifications';
+import { getChannelRuntime } from '@/notifications/runtime';
 import { logoutAction } from '../security/actions';
 import { THEME_COOKIE, parseTheme, selectedAccount, THEMES } from './account';
 import { AccountSwitch } from './AccountSwitch';
@@ -14,6 +17,23 @@ import { cookies } from 'next/headers';
 const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' } as const;
 
 /** Header, navigation and page frame around every signed-in page. Displays; decides nothing. */
+/** Only when alerts are ON and not getting through. Read-only; any problem simply shows nothing. */
+function alertsFailing(ctx: GuardContext): boolean {
+  try {
+    const settings = getNotificationSettings(ctx.db, ctx.now);
+    if (!settings.master) return false;
+    return (
+      alertHealth({
+        masterOn: true,
+        channelReady: getChannelRuntime().configured,
+        ...getHealthInput(ctx.db, ctx.now),
+      }) === 'failing'
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function Shell({ ctx, children }: { ctx: GuardContext; children: ReactNode }) {
   const { accounts, selected } = await selectedAccount(ctx);
   const statuses = accounts.map((a) => ({
@@ -23,6 +43,7 @@ export async function Shell({ ctx, children }: { ctx: GuardContext; children: Re
   const status = statuses.find((s) => s.account.id === selected?.id)?.status ?? null;
   // an account that is halted or unverifiable must not hide behind the one that is selected
   const others = statuses.filter((s) => s.account.id !== selected?.id && s.status.tone !== 'clear');
+  const failing = alertsFailing(ctx);
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
     <>
@@ -55,6 +76,16 @@ export async function Shell({ ctx, children }: { ctx: GuardContext; children: Re
             >
               {status.label}
             </span>
+          )}
+          {failing && (
+            <Link
+              href="/notifications"
+              className="badge badge-note"
+              role="status"
+              title="Alerts are on but not getting through"
+            >
+              Alerts: not getting through
+            </Link>
           )}
           {others.map((o) => (
             <span
