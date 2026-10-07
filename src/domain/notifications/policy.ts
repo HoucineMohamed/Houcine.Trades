@@ -52,19 +52,30 @@ export function itemStatus(
   const t = now.getTime();
   if (item.attempts.some((a) => a.status === 'sent'))
     return { status: 'sent', nextAt: null, failures: 0 };
-  const sorted = [...item.attempts].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const sorted = [...item.attempts].sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
   let failures = 0;
   let lastFailedMs: number | null = null;
   let retryAfter = 0;
-  let inFlight = false;
+  // A 'sending' row is the claim; a later 'sent' / 'failed' row is its result and closes it.
+  let open: AttemptRecord | null = null;
+  const fail = (atMs: number, retryAfterS: number | null) => {
+    failures += 1;
+    lastFailedMs = atMs;
+    retryAfter = retryAfterS ? retryAfterS * 1000 : 0;
+  };
   for (const a of sorted) {
-    const at = Date.parse(a.at);
-    const stale = a.status === 'sending' && t - at >= NOTIFY_LIMITS.staleSendingMs;
-    if (a.status === 'failed' || stale) {
-      failures += 1;
-      lastFailedMs = at;
-      retryAfter = a.retryAfterS ? a.retryAfterS * 1000 : 0;
-    } else if (a.status === 'sending') inFlight = true;
+    if (a.status === 'sending') {
+      if (open) fail(Date.parse(open.at), null); // a claim that never got a result
+      open = a;
+    } else {
+      open = null;
+      if (a.status === 'failed') fail(Date.parse(a.at), a.retryAfterS);
+    }
+  }
+  let inFlight = false;
+  if (open) {
+    if (t - Date.parse(open.at) >= NOTIFY_LIMITS.staleSendingMs) fail(Date.parse(open.at), null);
+    else inFlight = true;
   }
   const age = t - Date.parse(item.event.occurredAt);
   if (age > NOTIFY_LIMITS.maxAgeMs) return { status: 'expired', nextAt: null, failures };

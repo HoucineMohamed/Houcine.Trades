@@ -187,11 +187,11 @@ const AUTH_KIND_MAP: Record<string, EventKind | null> = {
   ai_consent_on: 'security_settings_changed',
   ai_consent_off: 'security_settings_changed',
   ai_caps_changed: 'security_settings_changed',
-  notifications_on: 'security_settings_changed',
   notifications_settings_changed: 'security_settings_changed',
   logout_all: 'logout_everywhere',
   step_up_failure: 'step_up_failed',
   // login_failure: summarized (see loginBurstEvents). notifications_off: the final notice covers it.
+  // notifications_on: you are present and just did it (the baseline starts from that moment).
 };
 
 export function eventFromAuthEvent(row: AuthEventRow): NotificationEvent | null {

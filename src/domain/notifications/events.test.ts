@@ -136,7 +136,6 @@ describe('authentication records', () => {
     ['ai_consent_on', 'security_settings_changed', 'warning'],
     ['ai_consent_off', 'security_settings_changed', 'warning'],
     ['ai_caps_changed', 'security_settings_changed', 'warning'],
-    ['notifications_on', 'security_settings_changed', 'warning'],
     ['notifications_settings_changed', 'security_settings_changed', 'warning'],
     ['logout_all', 'logout_everywhere', 'warning'],
     ['step_up_failure', 'step_up_failed', 'warning'],

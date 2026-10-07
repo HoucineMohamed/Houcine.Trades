@@ -94,6 +94,33 @@ describe('itemStatus (derived from the attempt log)', () => {
   });
 });
 
+describe('itemStatus: a claim and its result are one attempt', () => {
+  const sending = (ms: number): AttemptRecord => ({
+    status: 'sending',
+    at: at(ms),
+    retryAfterS: null,
+  });
+  const now = (ms: number) => new Date(T0.getTime() + ms);
+  it('"sending" followed by "failed" is ONE failure, not an attempt still in flight', () => {
+    const i = item(1, 'login_success', [sending(0), failed(100)]);
+    expect(itemStatus(i, now(MIN + 100))).toMatchObject({ status: 'due', failures: 1 });
+    expect(itemStatus(i, now(1000)).status).toBe('waiting');
+  });
+  it('"sending" followed by "sent" is done', () => {
+    const sent: AttemptRecord = { status: 'sent', at: at(100), retryAfterS: null };
+    expect(itemStatus(item(1, 'login_success', [sending(0), sent]), now(200)).status).toBe('sent');
+  });
+  it('a claim that never got a result and was claimed AGAIN counts as a failure', () => {
+    const i = item(1, 'login_success', [sending(0), sending(10 * MIN), failed(10 * MIN + 50)]);
+    expect(itemStatus(i, now(11 * MIN)).failures).toBe(2);
+  });
+  it('the retry-after belongs to the failure it came with', () => {
+    const i = item(1, 'login_success', [sending(0), failed(100, 300)]);
+    expect(itemStatus(i, now(250_000)).status).toBe('waiting');
+    expect(itemStatus(i, now(300_100)).status).toBe('due');
+  });
+});
+
 describe('planBatch (flood ceiling, summary, critical quota)', () => {
   const normals = (n: number) =>
     Array.from({ length: n }, (_, i) => item(100 + i, 'login_success', [], i));

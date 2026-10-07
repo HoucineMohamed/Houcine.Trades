@@ -85,3 +85,18 @@ export const msg = (
   chatType,
   text,
 });
+
+import type { Db } from '@/data/client';
+import { collectorBaseline } from '@/notifications/collector';
+import { setNotificationsMaster } from '@/data/notifications';
+import { freshAuthForTests } from './auth';
+
+/** Switches alerts ON the real way (fresh code, baseline). Creates the session row it needs. */
+export function enableAlerts(db: Db, now: Date): void {
+  db.$client
+    .prepare(
+      "INSERT OR IGNORE INTO sessions (id, token_hash, created_at, last_seen_at) VALUES (1, 'test-hash', ?, ?)",
+    )
+    .run(now.toISOString(), now.toISOString());
+  setNotificationsMaster(db, true, freshAuthForTests(1, now), now, {}, collectorBaseline(db, now));
+}
