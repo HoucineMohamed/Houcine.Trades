@@ -43,6 +43,12 @@ const FIXED: Partial<Record<EventKind, (acct: string, count: number) => string>>
   flood_summary: (_a, n) =>
     `${n} more events are waiting. Open the Notifications page to see them.`,
   backup_failed: () => 'A backup failed.',
+  backup_succeeded: () => 'A backup finished and was verified.',
+  backup_stale: () => 'No verified backup for a day and a half.',
+  migration_applied: () => 'A database update was applied, after a verified backup.',
+  migration_failed: () =>
+    'A database update failed. The old database was kept and the app did not start.',
+  restore_applied: () => 'A backup was restored.',
   market_data_stale: () => 'Market data is out of date.',
 };
 

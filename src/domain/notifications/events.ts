@@ -41,6 +41,11 @@ export const KIND_CATEGORY: Record<EventKind, NotificationCategory> = {
   test_message: 'system',
   flood_summary: 'system',
   backup_failed: 'system',
+  backup_succeeded: 'system',
+  backup_stale: 'system',
+  migration_applied: 'system',
+  migration_failed: 'system',
+  restore_applied: 'system',
   market_data_stale: 'system',
 };
 
@@ -65,6 +70,11 @@ const FIXED_SEVERITY: Record<Exclude<EventKind, UsageKind>, Severity> = {
   test_message: 'info',
   flood_summary: 'info',
   backup_failed: 'warning',
+  backup_succeeded: 'info',
+  backup_stale: 'warning',
+  migration_applied: 'info',
+  migration_failed: 'critical',
+  restore_applied: 'warning',
   market_data_stale: 'warning',
 };
 

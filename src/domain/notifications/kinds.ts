@@ -37,12 +37,17 @@ export const EVENT_KINDS = [
   'notifications_switched_off',
   'test_message',
   'flood_summary',
-  'backup_failed', // reserved: defined, nothing produces it yet (module 8)
+  'backup_failed',
+  'backup_succeeded', // module 8 (hosting): produced by the backup and release steps
+  'backup_stale',
+  'migration_applied',
+  'migration_failed',
+  'restore_applied',
   'market_data_stale', // reserved: defined, nothing produces it yet (no market data exists)
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
-export const RESERVED_KINDS: readonly EventKind[] = ['backup_failed', 'market_data_stale'];
+export const RESERVED_KINDS: readonly EventKind[] = ['market_data_stale'];
 
 /** The kinds that carry a usage level (50, 80 or 100 percent of a limit). */
 export const USAGE_KINDS = [

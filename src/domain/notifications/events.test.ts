@@ -45,7 +45,7 @@ describe('every event kind has a category and a severity', () => {
     expect(KIND_CATEGORY.notifications_switched_off).toBe('system');
   });
   it('the reserved system kinds exist (backup, market data) and nothing maps to them', () => {
-    expect(RESERVED_KINDS).toEqual(['backup_failed', 'market_data_stale']);
+    expect(RESERVED_KINDS).toEqual(['market_data_stale']);
     const rows = ['halt', 'reset', 'reset_refused', 'plan_refused', 'override', 'settings_change'];
     for (const kind of rows) {
       const e = eventFromRiskEvent({
@@ -251,6 +251,11 @@ describe('the full table of kinds (category and severity are pinned)', () => {
     test_message: ['system', 'info'],
     flood_summary: ['system', 'info'],
     backup_failed: ['system', 'warning'],
+    backup_succeeded: ['system', 'info'],
+    backup_stale: ['system', 'warning'],
+    migration_applied: ['system', 'info'],
+    migration_failed: ['system', 'critical'],
+    restore_applied: ['system', 'warning'],
     market_data_stale: ['system', 'warning'],
   };
   it('lists exactly the defined kinds', () => {

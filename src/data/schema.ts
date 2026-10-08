@@ -4,6 +4,7 @@ import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-cor
 import { ACCOUNT_MODES } from '../domain/accounts/account';
 import { AI_USAGE_STATUSES, ANALYST_KINDS } from '../domain/analyst/kinds';
 import { ATTEMPT_KINDS, AUTH_EVENT_KINDS } from '../domain/auth/kinds';
+import { BACKUP_ERROR_CODES, BACKUP_KINDS, BACKUP_OUTCOMES } from '../domain/hosting/kinds';
 import {
   CHANNEL_NAMES,
   DELIVERY_STATUSES,
@@ -439,3 +440,45 @@ export const notificationDeliveries = sqliteTable(
 export type NotificationSettingsRow = typeof notificationSettings.$inferSelect;
 export type NotificationEventRow = typeof notificationEvents.$inferSelect;
 export type NotificationDeliveryRow = typeof notificationDeliveries.$inferSelect;
+
+// ---------------------------------------------------------------------------------------------
+// Hosting (module 8). See docs/deploy.md. One row per backup ATTEMPT (append-only). No secret, key
+// or object content is stored: the object key only holds a time, a kind and a migration count.
+// ---------------------------------------------------------------------------------------------
+
+export const backupRuns = sqliteTable(
+  'backup_runs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind', { enum: BACKUP_KINDS }).notNull(),
+    outcome: text('outcome', { enum: BACKUP_OUTCOMES }).notNull(),
+    startedAt: text('started_at').notNull(),
+    finishedAt: text('finished_at').notNull(),
+    /** The object key (time, kind, migration count), or null when the backup never got that far. */
+    objectKey: text('object_key'),
+    sizeBytes: integer('size_bytes'),
+    /** SHA-256 of the encrypted object, as hex. */
+    sha256: text('sha256'),
+    /** A SHORT CODE when the backup failed (never free text: it could hold a URL). */
+    errorCode: text('error_code', { enum: BACKUP_ERROR_CODES }),
+  },
+  () => [
+    index('backup_runs_finished_idx').on(sql`finished_at`),
+    check('backup_runs_kind_check', inList('kind', BACKUP_KINDS)),
+    check('backup_runs_outcome_check', inList('outcome', BACKUP_OUTCOMES)),
+    check(
+      'backup_runs_error_check',
+      sql.raw(
+        `error_code IS NULL OR error_code IN (${BACKUP_ERROR_CODES.map((c) => `'${c}'`).join(', ')})`,
+      ),
+    ),
+    check(
+      'backup_runs_outcome_fields_check',
+      sql.raw(
+        "(outcome = 'ok' AND object_key IS NOT NULL AND sha256 IS NOT NULL AND error_code IS NULL) OR (outcome = 'failed' AND error_code IS NOT NULL)",
+      ),
+    ),
+  ],
+);
+
+export type BackupRunRow = typeof backupRuns.$inferSelect;

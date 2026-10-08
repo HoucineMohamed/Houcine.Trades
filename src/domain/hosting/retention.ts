@@ -12,8 +12,9 @@
  * the newest backup is never removed, and the newest of each kind is never removed.
  */
 
-export const BACKUP_KINDS = ['daily', 'pre-migration', 'manual'] as const;
-export type BackupKind = (typeof BACKUP_KINDS)[number];
+import { BACKUP_KINDS, type BackupKind } from './kinds';
+
+export { BACKUP_KINDS, type BackupKind };
 
 export const RETENTION = { daily: 7, weekly: 4, monthly: 6, preMigration: 5 } as const;
 

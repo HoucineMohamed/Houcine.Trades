@@ -15,6 +15,8 @@ export const ALL_TRIGGERS = [
   'ai_usage_no_update',
   'auth_events_no_delete',
   'auth_events_no_update',
+  'backup_runs_no_delete',
+  'backup_runs_no_update',
   'notification_deliveries_no_delete',
   'notification_deliveries_no_update',
   'notification_events_no_delete',

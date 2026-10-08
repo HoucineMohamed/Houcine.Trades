@@ -119,6 +119,19 @@ describe('golden messages (exact text)', () => {
       'Houcine.Trades (paper): 12 more events are waiting. Open the Notifications page to see them.',
     ],
     ['backup_failed', {}, 'Houcine.Trades (paper): A backup failed.'],
+    ['backup_succeeded', {}, 'Houcine.Trades (paper): A backup finished and was verified.'],
+    ['backup_stale', {}, 'Houcine.Trades (paper): No verified backup for a day and a half.'],
+    [
+      'migration_applied',
+      {},
+      'Houcine.Trades (paper): A database update was applied, after a verified backup.',
+    ],
+    [
+      'migration_failed',
+      {},
+      'Houcine.Trades (paper): A database update failed. The old database was kept and the app did not start.',
+    ],
+    ['restore_applied', {}, 'Houcine.Trades (paper): A backup was restored.'],
     ['market_data_stale', {}, 'Houcine.Trades (paper): Market data is out of date.'],
   ] as const)('%s %j', (kind, over, text) => {
     expect(msg(kind, over as never)).toBe(text);
