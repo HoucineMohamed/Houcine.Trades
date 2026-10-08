@@ -9,7 +9,7 @@ import { parseBlocks, parseSections, parseTableRows, type Block } from './help-p
  * fails if a key no longer matches the docs or a text contains advice wording.
  */
 
-export type DocFile = 'stats-glossary' | 'risk-rules';
+export type DocFile = 'stats-glossary' | 'risk-rules' | 'notifications';
 
 export interface HelpSource {
   file: DocFile;
@@ -20,6 +20,7 @@ export interface HelpSource {
 
 const S = (heading: string): HelpSource => ({ file: 'stats-glossary', heading });
 const R = (heading: string, row?: string): HelpSource => ({ file: 'risk-rules', heading, row });
+const N = (heading: string): HelpSource => ({ file: 'notifications', heading });
 const RULES = 'What the engine checks on every plan';
 const HALTS = 'Halts (the kill switch)';
 
@@ -65,6 +66,10 @@ export const HELP: Record<string, HelpSource> = {
   ruleOpenTrades: R(RULES, 'Max open trades'),
   ruleStop: R(RULES, 'Stop-loss required'),
   ruleCurrency: R(RULES, 'Currency check'),
+  // alerts
+  alertsWhat: N('What alerts are and are not'),
+  alertsQuieter: N('Why quieter settings wait 24 hours'),
+  alertsFlood: N('Flood protection'),
 };
 
 export type HelpKey = keyof typeof HELP;

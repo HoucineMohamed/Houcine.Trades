@@ -4,6 +4,14 @@ import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-cor
 import { ACCOUNT_MODES } from '../domain/accounts/account';
 import { AI_USAGE_STATUSES, ANALYST_KINDS } from '../domain/analyst/kinds';
 import { ATTEMPT_KINDS, AUTH_EVENT_KINDS } from '../domain/auth/kinds';
+import {
+  CHANNEL_NAMES,
+  DELIVERY_STATUSES,
+  ERROR_CODES,
+  EVENT_KINDS,
+  NOTIFICATION_CATEGORIES,
+  SEVERITIES,
+} from '../domain/notifications/kinds';
 import { HALT_KINDS, RISK_EVENT_KINDS, VERDICT_STAGES } from '../domain/risk/kinds';
 import { ASSET_CLASSES, DIRECTIONS, STATUSES } from '../domain/trades/types';
 
@@ -340,3 +348,94 @@ export const aiReviews = sqliteTable(
 export type AiSettingsRow = typeof aiSettings.$inferSelect;
 export type AiUsageRow = typeof aiUsage.$inferSelect;
 export type AiReviewRow = typeof aiReviews.$inferSelect;
+
+// ---------------------------------------------------------------------------------------------
+// Notifications (module 7). See docs/notifications.md. Events are RECORDED first (outbox) and
+// delivered later. No message text is stored: it is rebuilt from the fixed templates.
+// ---------------------------------------------------------------------------------------------
+
+/** The single settings row (id 1): master switch, consent, category switches, minimum severity. */
+export const notificationSettings = sqliteTable(
+  'notification_settings',
+  {
+    id: integer('id').primaryKey(),
+    /** 1 = "Send alerts to Telegram" is ON. Default OFF (no row means OFF). */
+    master: integer('master').notNull().default(0),
+    /** When the owner gave consent (the last time the switch was turned ON). */
+    consentAt: text('consent_at'),
+    categoriesJson: text('categories_json').notNull(),
+    minSeverity: text('min_severity', { enum: SEVERITIES }).notNull().default('info'),
+    /** Quieter changes waiting for their time (JSON). */
+    pendingJson: text('pending_json').notNull().default('{}'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  () => [
+    check('notification_settings_single_row_check', sql.raw('id = 1')),
+    check('notification_settings_master_check', sql.raw('master IN (0, 1)')),
+    check('notification_settings_severity_check', inList('min_severity', SEVERITIES)),
+  ],
+);
+
+/** Collector bookkeeping: how far each log was read, and the last level seen per limit (mutable). */
+export const notificationState = sqliteTable('notification_state', {
+  key: text('key').primaryKey(),
+  valueJson: text('value_json').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/** Append-only: one row per event, unique dedupe key (triggers refuse UPDATE and DELETE). */
+export const notificationEvents = sqliteTable(
+  'notification_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind', { enum: EVENT_KINDS }).notNull(),
+    category: text('category', { enum: NOTIFICATION_CATEGORIES }).notNull(),
+    severity: text('severity', { enum: SEVERITIES }).notNull(),
+    dedupeKey: text('dedupe_key').notNull().unique(),
+    /** An account NUMBER (never a name). */
+    accountId: integer('account_id'),
+    level: integer('level'),
+    count: integer('count'),
+    occurredAt: text('occurred_at').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  () => [
+    index('notification_events_occurred_idx').on(sql`occurred_at`),
+    check('notification_events_kind_check', inList('kind', EVENT_KINDS)),
+    check('notification_events_category_check', inList('category', NOTIFICATION_CATEGORIES)),
+    check('notification_events_severity_check', inList('severity', SEVERITIES)),
+    check('notification_events_level_check', sql.raw('level IS NULL OR level IN (50, 80, 100)')),
+  ],
+);
+
+/** Append-only: one row per delivery ATTEMPT. The current state is derived from the latest rows. */
+export const notificationDeliveries = sqliteTable(
+  'notification_deliveries',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    eventId: integer('event_id')
+      .notNull()
+      .references(() => notificationEvents.id, { onDelete: 'restrict' }),
+    channel: text('channel', { enum: CHANNEL_NAMES }).notNull(),
+    status: text('status', { enum: DELIVERY_STATUSES }).notNull(),
+    at: text('at').notNull(),
+    /** A short code only (never free text: it could hold a URL or a token). */
+    errorCode: text('error_code', { enum: ERROR_CODES }),
+    retryAfterS: integer('retry_after_s'),
+  },
+  () => [
+    index('notification_deliveries_event_idx').on(sql`event_id`, sql`id`),
+    check('notification_deliveries_channel_check', inList('channel', CHANNEL_NAMES)),
+    check('notification_deliveries_status_check', inList('status', DELIVERY_STATUSES)),
+    check(
+      'notification_deliveries_error_check',
+      sql.raw(
+        `error_code IS NULL OR error_code IN (${ERROR_CODES.map((c) => `'${c}'`).join(', ')})`,
+      ),
+    ),
+  ],
+);
+
+export type NotificationSettingsRow = typeof notificationSettings.$inferSelect;
+export type NotificationEventRow = typeof notificationEvents.$inferSelect;
+export type NotificationDeliveryRow = typeof notificationDeliveries.$inferSelect;

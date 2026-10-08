@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { getEnv } from '@/config/env';
+import { getNotificationSettings, loadHealth } from '@/data/notifications';
 import { loadRiskContext } from '@/data/risk';
+import { alertHealth } from '@/domain/notifications';
+import { getChannelRuntime } from '@/notifications/runtime';
 import { logoutAction } from '../security/actions';
 import { THEME_COOKIE, parseTheme, selectedAccount, THEMES } from './account';
 import { AccountSwitch } from './AccountSwitch';
@@ -13,6 +16,22 @@ import { cookies } from 'next/headers';
 
 const THEME_LABEL = { system: 'System', light: 'Light', dark: 'Dark' } as const;
 
+/**
+ * Alerts that are ON but not getting through, or whose state cannot be read. Read-only: any problem
+ * is shown as "status unknown", never hidden.
+ */
+function alertsIndicator(ctx: GuardContext): 'failing' | 'unknown' | null {
+  try {
+    const settings = getNotificationSettings(ctx.db, ctx.now);
+    if (!settings.master) return settings.problem !== null ? 'unknown' : null;
+    const health = loadHealth(ctx.db, ctx.now, getChannelRuntime().configured);
+    if (!health) return 'unknown';
+    return alertHealth(health.input) === 'failing' ? 'failing' : null;
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** Header, navigation and page frame around every signed-in page. Displays; decides nothing. */
 export async function Shell({ ctx, children }: { ctx: GuardContext; children: ReactNode }) {
   const { accounts, selected } = await selectedAccount(ctx);
@@ -23,6 +42,7 @@ export async function Shell({ ctx, children }: { ctx: GuardContext; children: Re
   const status = statuses.find((s) => s.account.id === selected?.id)?.status ?? null;
   // an account that is halted or unverifiable must not hide behind the one that is selected
   const others = statuses.filter((s) => s.account.id !== selected?.id && s.status.tone !== 'clear');
+  const alerts = alertsIndicator(ctx);
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
     <>
@@ -55,6 +75,20 @@ export async function Shell({ ctx, children }: { ctx: GuardContext; children: Re
             >
               {status.label}
             </span>
+          )}
+          {alerts && (
+            <Link
+              href="/notifications"
+              className="badge badge-note"
+              role="status"
+              title={
+                alerts === 'failing'
+                  ? 'Alerts are on but not getting through'
+                  : 'The state of the alerts could not be read'
+              }
+            >
+              {alerts === 'failing' ? 'Alerts: not getting through' : 'Alerts: status unknown'}
+            </Link>
           )}
           {others.map((o) => (
             <span

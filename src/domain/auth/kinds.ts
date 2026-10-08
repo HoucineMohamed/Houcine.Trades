@@ -17,6 +17,10 @@ export const AUTH_EVENT_KINDS = [
   'ai_consent_on',
   'ai_consent_off',
   'ai_caps_changed',
+  // Notifications module: the master switch and the settings (detail is a short generic code).
+  'notifications_on',
+  'notifications_off',
+  'notifications_settings_changed',
 ] as const;
 export type AuthEventKind = (typeof AUTH_EVENT_KINDS)[number];
 

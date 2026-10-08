@@ -11,7 +11,8 @@ src/
   domain/         pure logic: risk/, stats/, auth/ (rules only)
   data/           SQLite + Drizzle
   analyst/        server-only analyst service: gates, one request at a time, input loaders
-  integrations/   anthropic/ (the AI client), tradingview-mcp/, exchanges/
+  notifications/  server-only alerts: collector (derives events), delivery, worker cycle
+  integrations/   anthropic/ (the AI client), telegram/ (alert channel), tradingview-mcp/, exchanges/
   bots/           future bots framework
   config/         env validation, paper-mode guard
 ```
@@ -224,6 +225,28 @@ Full plain-language description in `docs/analyst.md`. In short:
   its triggers).
 - The analyst can never reach the risk engine, the settings writers or an order: a test checks the
   analyst code does not import them, and the model call has no tools.
+
+## Notifications (module 7)
+
+Full plain-language description in `docs/notifications.md`. In short:
+
+- `src/domain/notifications/` is pure: the event kinds (category, severity), the mapping from existing
+  records to events, usage levels (50/80/100 % with hysteresis and a one-hour cooldown), the FIXED message
+  templates, the outbox policy (backoff, maximum age, hourly ceiling, critical reserve, summary) and the
+  settings rules (louder now, quieter after 24 hours).
+- `src/integrations/telegram/` holds the `NotificationChannel` interface (send only), the `fetch` adapter
+  (the token is inside the URL, so every failure becomes a short code and nothing is ever logged or thrown
+  with a URL) and lazy env validation. The pairing source is used only by the setup script.
+- `src/notifications/` is the only code that sends. `collectEvents` reads NEW rows of the risk, verdict, auth
+  and analyst logs plus the current usage of the limits (read-only) and records events with a unique dedupe
+  key together with its watermarks, in one transaction. `deliverPending` claims what is due in an IMMEDIATE
+  transaction (so the worker and the button cannot double-send), sends through the channel, and records every
+  attempt. `runCycle` never throws. Nothing in the trade, halt, risk, login or analyst code calls any of it.
+- Tables `notification_settings` (one row), `notification_state` (watermarks, last levels), append-only
+  `notification_events` and `notification_deliveries` (migration 0005; short codes only). Master-switch and
+  settings changes are logged in `auth_events` (rebuilt again, with its triggers re-created).
+- Runs from `npm run notify:worker` (module 8 will run it as a service) and the guarded buttons. No timer in
+  the web server.
 
 ## Data and hosting
 

@@ -21,6 +21,8 @@
     "auth:generate-secret": "node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\"",
     "auth:create-owner": "tsx --conditions=react-server scripts/auth/create-owner.ts",
     "auth:reset": "tsx --conditions=react-server scripts/auth/reset.ts",
+    "notify:worker": "tsx --conditions=react-server scripts/notify/worker.ts",
+    "notify:set-telegram": "tsx --conditions=react-server scripts/notify/set-telegram.ts",
     "ai:set-key": "tsx --conditions=react-server scripts/ai/set-key.ts",
     "dev:seed": "tsx --conditions=react-server scripts/dev/seed.ts"
   },

@@ -51,6 +51,6 @@ export function getAccount(db: Reader, id: number): Account | undefined {
   return db.select().from(accounts).where(eq(accounts.id, id)).get();
 }
 
-export function listAccounts(db: Db): Account[] {
+export function listAccounts(db: Reader): Account[] {
   return db.select().from(accounts).orderBy(desc(accounts.id)).all();
 }

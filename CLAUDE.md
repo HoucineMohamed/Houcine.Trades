@@ -6,11 +6,12 @@ It will run online 24/7 later. The owner is a trading beginner, so **correctness
 more than speed**. Built module by module (see `docs/roadmap.md`).
 
 Status: modules 1 (data model and journal), 2 (stats engine), 3 (risk engine), 4
-(authentication), 5 (dashboard UI) and 6 (Claude analyst v1, journal coach) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
+(authentication), 5 (dashboard UI), 6 (Claude analyst v1, journal coach) and 7 (notifications) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
 minimal functional UI, a pure stats engine (`/stats`), a pure risk engine (`/risk`) that approves or
 refuses trade plans, sizes positions and can halt trading, and single-owner login (password +
 authenticator code), and a calm dashboard UI (the "Ledger" design), and an AI analyst that only reviews and explains (`/analyst`, see
-`docs/analyst.md`). No other integrations yet. Every statistic is explained in `docs/stats-glossary.md`,
+`docs/analyst.md`), and one-way Telegram alerts about events inside the app (`/notifications`, see
+`docs/notifications.md`). No other integrations yet. Every statistic is explained in `docs/stats-glossary.md`,
 every risk rule in `docs/risk-rules.md` and every protection in `docs/security.md`.
 
 > **Authentication exists, hosting does not.** The app still binds to localhost (`dev` and `start`
@@ -39,14 +40,20 @@ Next.js (App Router) + TypeScript (strict, `noUncheckedIndexedAccess`), SQLite v
 - `drizzle/` committed SQL migrations (generated, do not edit by hand)
 - `src/analyst/` server-only analyst service (gates, one request at a time, input loaders, lazy
   runtime); the only code that calls the AI client. `src/domain/analyst/` is its pure part
+- `src/notifications/` server-only: the collector (derives events from existing logs), the delivery
+  service, one worker cycle. `src/domain/notifications/` is its pure part. Nothing in the trade, halt,
+  risk, login or analyst code calls it (a test checks the imports); `scripts/notify/` the worker and
+  the Telegram setup script
 - `src/integrations/` `anthropic/` (the AI client interface, `fetch` client, env validation),
+  `telegram/` (the channel interface, `fetch` adapter, env validation),
   `tradingview-mcp/`, `exchanges/` (future adapters)
 - `src/bots/` future bots framework
 - `src/config/` env loading and the paper-mode guard
 - `tests/` cross-cutting tests; module tests may sit beside their code as `*.test.ts`
 - `docs/` `architecture.md`, `roadmap.md`
 
-Dependency direction: `app -> analyst, domain, data`; `analyst -> data, domain, integrations`;
+Dependency direction: `app -> analyst, notifications, domain, data`; `analyst -> data, domain, integrations`;
+`notifications -> data, domain, integrations`;
 `data -> domain, config`; `integrations -> domain`;
 `bots -> domain, integrations`. `domain` imports from none of them.
 
@@ -62,6 +69,8 @@ Dependency direction: `app -> analyst, domain, data`; `analyst -> data, domain, 
 - `npm run dev:seed` fill a separate DEMO database (refuses the real journal; see the README)
 - `npm run ai:set-key` put `ANTHROPIC_API_KEY` into `.env` (hidden input, real terminal only, never
   prints the key)
+- `npm run notify:worker` collect events and deliver alerts every 30 s until Ctrl+C;
+  `npm run notify:set-telegram` put `TELEGRAM_BOT_TOKEN` into `.env` (hidden input) and pair the chat
 - `npm run auth:generate-secret` print a random `AUTH_SECRET`; `npm run auth:create-owner` create the
   one owner (real terminal only); `npm run auth:reset` reset password and authenticator
 
@@ -188,12 +197,43 @@ Five review agents live in `.claude/agents/` (details, license and attribution i
   - Output is escaped plain text only (no HTML, markdown, links, images). Tests never touch the network
     (`tests/helpers/no-network.ts`); use `tests/helpers/analyst.ts` (the fake client). Never put a
     key-looking literal in the repository: build test keys at run time.
+- Notification rules (module 7), details in `docs/notifications.md`:
+  - **One-way.** The channel can never send a command to the app: no webhook, no listening bot, no
+    remote kill switch or confirm. Incoming messages are read ONLY during the one-time pairing
+    (`notify:set-telegram`), and only the exact code from a private chat counts.
+  - **Never in the way.** A notification failure must never block, delay or change a trade action, a halt,
+    a risk check or a login: nothing in those paths imports the notification code, and nothing sends from
+    inside a request that does one of them. Delivery runs only from `notify:worker` and the guarded
+    "Deliver now" / "Send test" buttons. No timer inside the web server.
+  - **Outbox.** Events are recorded first (append-only `notification_events`, unique dedupe key), delivered
+    later; attempts are logged in append-only `notification_deliveries` with SHORT CODES only (never free
+    text). Capped backoff (1, 2, 4, 8, 16, then 30 min), 24 h maximum age (then "expired", never sent),
+    ceiling 20/hour plus a reserved 10 for critical events, one summary per hour. At-least-once.
+  - **Derived events.** `src/domain/notifications/` maps existing records (risk events, verdicts, auth log,
+    analyst usage) and the engines' usage figures to events; the collector only READS (it uses
+    `loadRiskContext`, `computeRiskUsage`, `getUsageTotals`); no risk, auth or analyst code emits anything.
+    Only events from the moment alerts are switched on are announced (baseline).
+  - **Messages are fixed templates** (`messages.ts`): only an event kind, a level, a count and an account
+    NUMBER can vary. NEVER notes, emotions, setup names, symbols, account names, balances, amounts, prices,
+    keys, tokens, passwords, emails or IP addresses. Plain text: no parse mode, links or buttons.
+  - **The token is in the URL** (Telegram Bot API). Never log, store, display or throw a URL, a request or a
+    raw fetch error: the adapter reduces every failure to a short code. A reply without exactly the expected
+    shape is a failure (fail closed), also during pairing. Unverified Telegram facts are listed in
+    `docs/notifications.md` ("to confirm on first live test").
+  - **Master switch** "Send alerts to Telegram" is OFF by default; turning it ON needs the consent screen
+    and a `FreshAuth`; turning it OFF ALSO needs a `FreshAuth`, takes effect at once and sends one final
+    notice. Switching a category off or raising the minimum severity needs a `FreshAuth` and takes effect
+    after 24 hours (cancel by asking for the louder setting). Critical events are never switched off. All
+    changes are logged in `auth_events`.
+  - Tests use the fake channel (`tests/helpers/notifications.ts`); test tokens are built at run time.
 - Hand-written SQL in migrations is not tracked by drizzle-kit: the triggers protecting
   `initial_stop_loss` (`0001`), `closed_recorded_at` and the append-only `risk_events` /
   `risk_verdicts` (`0002`), and the auth triggers (`0003`: single owner, append-only `auth_events`,
   frozen session identity, final revocation, single-use recovery codes). Migration `0004` rebuilt
   `auth_events` (three new event kinds) and re-created its two triggers, and added the append-only
-  `ai_usage` / `ai_reviews` and the undeletable `ai_settings` row. A future migration that rebuilds a table must re-create its triggers;
+  `ai_usage` / `ai_reviews` and the undeletable `ai_settings` row. Migration `0005` rebuilt `auth_events`
+  AGAIN (three notification kinds), re-created its two triggers, and added the append-only
+  `notification_events` / `notification_deliveries` and the undeletable `notification_settings` row. A future migration that rebuilds a table must re-create its triggers;
   tests list every trigger and fail if one is missing.
 - Schema changes: edit `src/data/schema.ts`, run `npm run db:generate`, commit the new file in
   `drizzle/`. CI fails if the schema and migrations disagree.
