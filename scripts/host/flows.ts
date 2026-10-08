@@ -113,6 +113,10 @@ export async function restoreFlow(io: Io, o: RestoreFlowOptions): Promise<number
     io.print(
       'or stop and start it). The swap happens at the start, before anything opens the database.',
     );
+    io.print(
+      'Changed your mind? Run: npm run host:restore -- --cancel   (a staged restore that is not',
+    );
+    io.print('applied within 6 hours is discarded by itself).');
     return 0;
   }
 

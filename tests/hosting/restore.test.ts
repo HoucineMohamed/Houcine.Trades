@@ -9,8 +9,10 @@ import { generateBackupKey, parseBackupKey } from '@/hosting/crypto';
 import { createLogger } from '@/hosting/logger';
 import {
   applyStagedRestore,
+  cancelStagedRestore,
   listBackups,
   restoreIsStaged,
+  STAGE_MAX_AGE_MS,
   stageRestore,
   type RestoreDeps,
 } from '@/hosting/restore';
@@ -265,6 +267,45 @@ describe('restore: apply is careful', () => {
       applied: false,
       reason: 'invalid',
     });
+  });
+});
+
+describe('a staged restore cannot surprise a later restart', () => {
+  it('can be cancelled, and then nothing is applied', async () => {
+    const objectKey = await backupOf(src);
+    liveWith('current').$client.close();
+    await stageRestore(rd(), objectKey);
+    expect(cancelStagedRestore(dataDir)).toBe(true);
+    expect(restoreIsStaged(dataDir)).toBe(false);
+    expect(fs.existsSync(path.join(dataDir, 'restore', 'incoming.db'))).toBe(false);
+    expect(await applyStagedRestore({ dataDir, databaseFile: liveFile })).toEqual({
+      applied: false,
+      reason: 'nothing_staged',
+    });
+    expect(cancelStagedRestore(dataDir)).toBe(false); // nothing left to cancel
+  });
+
+  it('is discarded, not applied, when it waited too long (a forgotten staging)', async () => {
+    const objectKey = await backupOf(src);
+    liveWith('current').$client.close();
+    await stageRestore(rd(), objectKey); // staged at NOW
+    const later = new Date(NOW.getTime() + STAGE_MAX_AGE_MS + 1000);
+    expect(
+      await applyStagedRestore({ dataDir, databaseFile: liveFile, clock: () => later }),
+    ).toEqual({ applied: false, reason: 'expired' });
+    expect(restoreIsStaged(dataDir)).toBe(false); // gone
+    const db = createDatabase(liveFile);
+    expect(names(db)).toEqual(['current']); // untouched
+    db.$client.close();
+  });
+
+  it('is still applied just inside the limit', async () => {
+    const objectKey = await backupOf(src);
+    await stageRestore(rd(), objectKey);
+    const inside = new Date(NOW.getTime() + STAGE_MAX_AGE_MS - 1000);
+    expect(
+      await applyStagedRestore({ dataDir, databaseFile: liveFile, clock: () => inside }),
+    ).toMatchObject({ applied: true });
   });
 });
 

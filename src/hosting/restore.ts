@@ -28,6 +28,9 @@ import type { Logger } from './logger';
  * Nothing here ever deletes the live database.
  */
 
+/** A staged restore that waits longer than this is discarded instead of applied (a forgotten one must not surprise a later restart). */
+export const STAGE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
 const DIR = 'restore';
 const INCOMING = 'incoming.db';
 const MARKER = 'READY.json';
@@ -155,6 +158,13 @@ export async function stageRestore(deps: RestoreDeps, objectKey: string): Promis
   }
 }
 
+/** Throws away a staged restore. True if there was one. */
+export function cancelStagedRestore(dataDir: string): boolean {
+  const had = fs.existsSync(paths(dataDir).marker) || fs.existsSync(paths(dataDir).incoming);
+  cleanStage(dataDir);
+  return had;
+}
+
 /** True when a restore has been staged and is waiting for the next start. */
 export function restoreIsStaged(dataDir: string): boolean {
   return fs.existsSync(paths(dataDir).marker);
@@ -164,7 +174,8 @@ export type ApplyResult =
   | { applied: false; reason: 'nothing_staged' }
   | {
       applied: false;
-      reason: 'invalid' | 'changed' | 'integrity_failed' | 'newer_than_app' | 'swap_failed';
+      reason:
+        'invalid' | 'changed' | 'integrity_failed' | 'newer_than_app' | 'swap_failed' | 'expired';
     }
   | { applied: true; keptAs: string | null; objectKey: string };
 
@@ -200,6 +211,11 @@ async function applyChecked(opts: {
     return { applied: false, reason: 'invalid' };
   }
   if (!fs.existsSync(p.incoming)) return { applied: false, reason: 'invalid' };
+  const stagedAt = Date.parse(marker.stagedAt);
+  if (!Number.isFinite(stagedAt) || clock().getTime() - stagedAt > STAGE_MAX_AGE_MS) {
+    cleanStage(opts.dataDir); // forgotten: discarded, never applied by surprise
+    return { applied: false, reason: 'expired' };
+  }
   if (sha256(fs.readFileSync(p.incoming)) !== marker.sha256)
     return { applied: false, reason: 'changed' };
   try {

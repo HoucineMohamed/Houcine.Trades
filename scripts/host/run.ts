@@ -1,6 +1,7 @@
 import { readHostingConfig, type HostingConfig } from '@/hosting/config';
 import { createLogger, secretsFromEnv, type Logger } from '@/hosting/logger';
 import { createS3Store, type ObjectStore } from '@/hosting/object-store';
+import { stepDownIfRoot } from '../auth/run';
 
 /** Shared start-up for the hosting command-line scripts. Prints names of problems, never values. */
 
@@ -12,6 +13,7 @@ export interface HostingContext {
 }
 
 export function hostingContext(service: string): HostingContext | null {
+  stepDownIfRoot();
   const cfg = readHostingConfig(process.env);
   const log = createLogger({ service, secrets: secretsFromEnv(process.env) });
   if (!cfg.store || !cfg.backupKey) {

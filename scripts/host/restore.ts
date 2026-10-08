@@ -1,12 +1,13 @@
-import { terminalIo } from '../auth/run';
-import { loadEnvFile } from '../auth/run';
+import { cancelStagedRestore } from '@/hosting/restore';
+import { loadEnvFile, terminalIo } from '../auth/run';
 import { restoreFlow } from './flows';
 import { hostingContext } from './run';
 
 /**
  * `npm run host:restore`: lists the backups, asks you to choose one and to type RESTORE, downloads it
  * and checks it (decryption, integrity, migrations) into a NEW file, and stages it. The swap happens
- * at the next start of the service. `--swap-now` swaps immediately (only with the app stopped).
+ * at the next start of the service (a staged restore that waits more than 6 hours is discarded).
+ * `--cancel` throws a staged restore away. `--swap-now` swaps immediately (only with the app stopped).
  */
 async function main(): Promise<number> {
   loadEnvFile();
@@ -21,6 +22,14 @@ async function main(): Promise<number> {
     return 1;
   }
   const args = process.argv.slice(2);
+  if (args.includes('--cancel')) {
+    console.log(
+      cancelStagedRestore(ctx.cfg.dataDir)
+        ? 'The staged restore was discarded. Nothing will be swapped at the next start.'
+        : 'Nothing was staged.',
+    );
+    return 0;
+  }
   const swapNow = args.includes('--swap-now');
   const named = args.find((a) => a.startsWith('--key='))?.slice('--key='.length) ?? null;
   return restoreFlow(terminalIo, {
