@@ -25,7 +25,7 @@ export interface Scan {
 
 const WRAPPERS: Record<EntryKind, string[]> = {
   page: ['guardedPage', 'publicPage'],
-  route: ['guardedRoute'],
+  route: ['guardedRoute', 'publicRoute'],
   action: ['guardedAction', 'publicAction'],
 };
 const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
@@ -200,8 +200,9 @@ export function scanApp(root: string): Scan {
   return { entries, problems };
 }
 
-/** The ONLY entry points allowed to be public: the sign-in page and the sign-in action. */
+/** The ONLY entry points allowed to be public: the sign-in page, the sign-in action and /healthz. */
 export const PUBLIC_ENTRIES: ReadonlySet<string> = new Set([
   'src/app/login/page.tsx#default',
   'src/app/login/actions.ts#loginAction',
+  'src/app/healthz/route.ts#GET',
 ]);

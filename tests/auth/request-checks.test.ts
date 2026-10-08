@@ -40,13 +40,18 @@ describe('Origin / Host check (CSRF)', () => {
 });
 
 describe('public paths', () => {
-  it('are only the login page and Next static files', () => {
+  it('are only the login page, the health check and Next static files', () => {
     expect(isPublicPath('/login')).toBe(true);
+    expect(isPublicPath('/healthz')).toBe(true);
     expect(isPublicPath('/_next/static/chunks/a.js')).toBe(true);
     for (const p of [
       '/',
       '/trades',
       '/login/x',
+      '/healthz/x',
+      '/healthz/',
+      '/Healthz',
+      '/healthzx',
       '/loginx',
       '/_next/image',
       '/api/x',

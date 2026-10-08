@@ -43,9 +43,9 @@ export function checkOrigin(method: string, headers: HeaderReader): OriginVerdic
     : { ok: false, reason: 'origin does not match host' };
 }
 
-/** Only the login page and Next's own static files are reachable without a session. */
+/** Only the login page, the health check and Next's own static files are reachable without a session. */
 export function isPublicPath(pathname: string): boolean {
-  return pathname === '/login' || pathname.startsWith('/_next/static/');
+  return pathname === '/login' || pathname === '/healthz' || pathname.startsWith('/_next/static/');
 }
 
 export function buildCsp(nonce: string, options: { dev: boolean; https: boolean }): string {

@@ -102,6 +102,25 @@ export function guardedRoute<C>(
   };
 }
 
+/**
+ * The wrapper for the health check route ONLY (/healthz, listed in the coverage test). It reads no
+ * cookie and no session and returns a fixed answer: a failure inside becomes "not ok", never details.
+ */
+export function publicRoute(
+  fn: (request: Request) => Promise<Response>,
+): (request: Request) => Promise<Response> {
+  return async (request) => {
+    try {
+      return await fn(request);
+    } catch {
+      return new Response('not ok', {
+        status: 503,
+        headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
+  };
+}
+
 /** For the page wrapper in guard.tsx. Redirects to /login when there is no valid session. */
 export async function requireContext(): Promise<GuardContext> {
   return (await resolve()) ?? toLogin();

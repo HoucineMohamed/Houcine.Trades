@@ -18,9 +18,12 @@ describe('every entry point is behind the guard', () => {
     expect(scan.problems).toEqual([]);
   });
 
-  it('allows only the login page and login action to be public', () => {
+  it('allows only the login page, the login action and /healthz to be public', () => {
     const publicOnes = scan.entries
-      .filter((e) => e.wrapper === 'publicPage' || e.wrapper === 'publicAction')
+      .filter(
+        (e) =>
+          e.wrapper === 'publicPage' || e.wrapper === 'publicAction' || e.wrapper === 'publicRoute',
+      )
       .map((e) => `${e.file.replaceAll('\\', '/')}#${e.exportName}`)
       .sort();
     expect(publicOnes).toEqual([...PUBLIC_ENTRIES].sort());
@@ -88,5 +91,24 @@ describe('the scanner itself catches mistakes', () => {
       `'use server';\nconst guardedAction = (f: unknown) => f;\nexport const a = guardedAction(async () => {});\n`,
     );
     expect(s.problems.join()).toContain('must be imported from the shared guard');
+  });
+});
+
+describe('the public health route', () => {
+  it('uses the shared publicRoute wrapper and is the only public route', () => {
+    const routes = scanApp(ROOT).entries.filter((e) => e.kind === 'route');
+    expect(
+      routes.map((r) => `${r.file.replaceAll('\\', '/')}#${r.exportName}:${r.wrapper}`),
+    ).toEqual(['src/app/healthz/route.ts#GET:publicRoute']);
+  });
+  it('a public route that is not in the allowlist is flagged by the allowlist test', () => {
+    const s = scanSource(
+      'src/app/other/route.ts',
+      `import { publicRoute } from '../_lib/guard-core';\nexport const GET = publicRoute(async () => new Response());\n`,
+    );
+    expect(s.entries.map((e) => `${e.file}#${e.exportName}`)).toEqual([
+      'src/app/other/route.ts#GET',
+    ]);
+    expect(PUBLIC_ENTRIES.has('src/app/other/route.ts#GET')).toBe(false);
   });
 });
