@@ -3,6 +3,8 @@
  * "ok" only when there is a verified backup younger than 36 hours and the latest attempt did not fail.
  */
 
+import type { BackupErrorCode } from './kinds';
+
 export const BACKUP_STALE_MS = 36 * 60 * 60 * 1000;
 
 export type BackupState = 'ok' | 'last_failed' | 'stale' | 'never' | 'pending' | 'unknown';
@@ -53,6 +55,29 @@ export function needsStaleNotice(i: BackupHealthInput): boolean {
   const since = i.trackingSince === null ? Number.NaN : Date.parse(i.trackingSince);
   return Number.isFinite(since) && i.now.getTime() - since > BACKUP_STALE_MS;
 }
+
+/** Short text for the header badge (only shown for the states that are a problem). */
+export const BACKUP_HEADER_WORDS: Record<BackupState, string> = {
+  ok: 'Backups: ok',
+  pending: 'Backups: waiting for the first one',
+  last_failed: 'Backups: last attempt failed',
+  stale: 'Backups: none in the last day and a half',
+  never: 'Backups: none yet',
+  unknown: 'Backups: status unknown',
+};
+
+/** What a failed backup's short code means, in words (the database stores only the code). */
+export const BACKUP_ERROR_WORDS: Record<BackupErrorCode, string> = {
+  snapshot_failed: 'the database snapshot could not be taken',
+  snapshot_corrupt: 'the snapshot failed its integrity check',
+  encrypt_failed: 'the snapshot could not be encrypted',
+  upload_failed: 'the upload was refused or incomplete',
+  verify_failed: 'the uploaded copy did not match when read back',
+  store_unreachable: 'the backup storage could not be reached',
+  store_denied: 'the backup storage refused the keys',
+  not_configured: 'the backup settings are incomplete',
+  unexpected: 'an unexpected problem',
+};
 
 /** Shown in the header: everything except a healthy state and the first hours after setup. */
 export const backupIsProblem = (s: BackupState): boolean => s !== 'ok' && s !== 'pending';

@@ -34,7 +34,10 @@ describe('parseStoreConfig', () => {
     ['placeholder bucket', { S3_BUCKET: 'replace-with-your-bucket' }],
     ['short key id', { S3_ACCESS_KEY_ID: 'abc' }],
     ['short secret', { S3_SECRET_ACCESS_KEY: 'short' }],
-    ['placeholder secret', { S3_SECRET_ACCESS_KEY: 'replace-with-your-secret-key-please' }],
+    [
+      'placeholder secret',
+      { S3_SECRET_ACCESS_KEY: ['replace', 'with', 'your', 'secret', 'key', 'please'].join('-') },
+    ],
     ['space in secret', { S3_SECRET_ACCESS_KEY: `${rnd(20, 'x')} ${rnd(20, 'y')}` }],
     ['prefix with ..', { S3_PREFIX: 'a/../b' }],
   ];

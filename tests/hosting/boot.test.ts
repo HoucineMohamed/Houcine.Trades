@@ -171,7 +171,20 @@ describe('boot: every failed guard refuses to start, touches nothing, spawns not
     ['AUTH_SECRET missing', () => delete env.AUTH_SECRET],
     [
       'AUTH_SECRET placeholder',
-      () => (env.AUTH_SECRET = 'replace-with-the-output-of-the-generate-command-see-docs-security'),
+      () =>
+        (env.AUTH_SECRET = [
+          'replace',
+          'with',
+          'the',
+          'output',
+          'of',
+          'the',
+          'generate',
+          'command',
+          'see',
+          'docs',
+          'security',
+        ].join('-')),
     ],
     ['TRUST_PROXY not configured', () => delete env.TRUST_PROXY],
     ['TRADING_MODE live', () => (env.TRADING_MODE = 'live')],

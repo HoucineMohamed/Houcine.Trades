@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/risk', label: 'Risk' },
   { href: '/analyst', label: 'Analyst' },
   { href: '/notifications', label: 'Alerts' },
+  { href: '/backups', label: 'Backups' },
   { href: '/accounts', label: 'Accounts' },
   { href: '/setups', label: 'Setups' },
 ];

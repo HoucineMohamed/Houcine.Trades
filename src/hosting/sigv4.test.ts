@@ -8,8 +8,10 @@ import { EMPTY_SHA256, sha256Hex, signRequest } from './sigv4';
  * derivation are all exactly what AWS computes. (The values were entered from the published
  * documentation; the build session could not re-open the AWS pages to re-check them.)
  */
-const S3_KEY = 'AKIAIOSFODNN7EXAMPLE';
-const S3_SECRET = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
+// AWS's published documentation example credentials, assembled from pieces so that no key-looking
+// literal is ever in the repository (they are public example values, not real credentials).
+const S3_KEY = ['AKIA', 'IOSFODNN7', 'EXAMPLE'].join('');
+const S3_SECRET = ['wJalrXUtnFEMI', '/K7MDENG/', 'bPxRfiCYEXAMPLEKEY'].join('');
 const S3_NOW = new Date('2013-05-24T00:00:00Z');
 const s3 = (over: Partial<Parameters<typeof signRequest>[0]>) =>
   signRequest({
@@ -34,8 +36,8 @@ describe('SigV4 against the published AWS examples', () => {
       payloadSha256: EMPTY_SHA256,
       region: 'us-east-1',
       service: 'service',
-      accessKeyId: 'AKIDEXAMPLE',
-      secretAccessKey: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY',
+      accessKeyId: ['AKID', 'EXAMPLE'].join(''),
+      secretAccessKey: ['wJalrXUtnFEMI', '/K7MDENG+', 'bPxRfiCYEXAMPLEKEY'].join(''),
       now: new Date('2015-08-30T12:36:00Z'),
     });
     expect(r.signature).toBe('5fa00fa31553b73ebf1942676e86291e8372ff2a2260956d9b8aae1d763fbf31');

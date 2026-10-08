@@ -13,7 +13,7 @@ import { StoreError } from '@/hosting/object-store';
 import { enableAlerts } from '../helpers/notifications';
 import { FakeObjectStore } from '../helpers/object-store';
 
-const SECRET_NOTE = 'my-very-private-account-name-zzq';
+const PRIVATE_ACCOUNT_NAME = 'my-very-private-account-name-zzq';
 let dir: string;
 let db: Db;
 let store: FakeObjectStore;
@@ -45,7 +45,12 @@ beforeEach(() => {
   db = createDatabase(path.join(dir, 'live.db'));
   migrateDatabase(db);
   db.insert(accounts)
-    .values({ name: SECRET_NOTE, baseCurrency: 'EUR', startingBalance: '1000', createdAt: 't' })
+    .values({
+      name: PRIVATE_ACCOUNT_NAME,
+      baseCurrency: 'EUR',
+      startingBalance: '1000',
+      createdAt: 't',
+    })
     .run();
   store = new FakeObjectStore();
   key = parseBackupKey(generateBackupKey()) as Buffer;
@@ -66,7 +71,7 @@ describe('a backup', () => {
     const blob = store.objects.get(r.objectKey) as Buffer;
     // nothing readable leaves the server
     expect(blob.includes(Buffer.from('SQLite format 3'))).toBe(false);
-    expect(blob.includes(Buffer.from(SECRET_NOTE))).toBe(false);
+    expect(blob.includes(Buffer.from(PRIVATE_ACCOUNT_NAME))).toBe(false);
     expect(blob.subarray(0, 4).toString()).toBe('HTB1');
     // it was read back (put, then get)
     expect(store.calls).toEqual(['put', 'get']);
@@ -154,7 +159,7 @@ describe('a backup', () => {
     const text = lines.join('\n');
     expect(text).toContain('backup.failed');
     expect(text).not.toContain(key.toString('base64url'));
-    expect(text).not.toContain(SECRET_NOTE);
+    expect(text).not.toContain(PRIVATE_ACCOUNT_NAME);
     expect(text).not.toContain(dir);
     expect(text).not.toMatch(/https?:\/\//);
   });

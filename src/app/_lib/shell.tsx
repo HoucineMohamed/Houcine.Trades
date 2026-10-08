@@ -1,8 +1,11 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { isHosted } from '@/auth/hosted';
 import { getEnv } from '@/config/env';
+import { readBackupStatus } from '@/data/backups';
 import { getNotificationSettings, loadHealth } from '@/data/notifications';
 import { loadRiskContext } from '@/data/risk';
+import { BACKUP_HEADER_WORDS, backupIsProblem, backupState } from '@/domain/hosting/backup-health';
 import { alertHealth } from '@/domain/notifications';
 import { getChannelRuntime } from '@/notifications/runtime';
 import { logoutAction } from '../security/actions';
@@ -32,6 +35,20 @@ function alertsIndicator(ctx: GuardContext): 'failing' | 'unknown' | null {
   }
 }
 
+/**
+ * Backups, hosted app only: a missing, failed or unreadable backup is shown in the header. Read-only;
+ * an unreadable state is shown as "status unknown", never hidden.
+ */
+function backupsIndicator(ctx: GuardContext): string | null {
+  if (!isHosted()) return null;
+  try {
+    const state = backupState({ ...readBackupStatus(ctx.db), now: ctx.now });
+    return backupIsProblem(state) ? BACKUP_HEADER_WORDS[state] : null;
+  } catch {
+    return BACKUP_HEADER_WORDS.unknown;
+  }
+}
+
 /** Header, navigation and page frame around every signed-in page. Displays; decides nothing. */
 export async function Shell({ ctx, children }: { ctx: GuardContext; children: ReactNode }) {
   const { accounts, selected } = await selectedAccount(ctx);
@@ -43,16 +60,25 @@ export async function Shell({ ctx, children }: { ctx: GuardContext; children: Re
   // an account that is halted or unverifiable must not hide behind the one that is selected
   const others = statuses.filter((s) => s.account.id !== selected?.id && s.status.tone !== 'clear');
   const alerts = alertsIndicator(ctx);
+  const backups = backupsIndicator(ctx);
+  const hosted = isHosted();
   const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
     <>
       <a className="skip-link" href="#content">
         Skip to content
       </a>
-      <div className="banner-local" role="note">
-        <strong>LOCALHOST ONLY.</strong> Sign-in protects this app, but it must not be exposed to a
-        network until module 8 (HTTPS and backups).
-      </div>
+      {hosted ? (
+        <div className="banner-local banner-hosted" role="note">
+          <strong>HOSTED, PAPER MODE.</strong> This app is online and protected by your sign-in. No
+          real orders can be placed.
+        </div>
+      ) : (
+        <div className="banner-local" role="note">
+          <strong>LOCALHOST ONLY.</strong> Sign-in protects this app. On your own computer it
+          listens on this machine only. Putting it online is a separate step (docs/deploy.md).
+        </div>
+      )}
       <header className="app-header">
         <div className="app-header-inner">
           <Link href="/" className="wordmark">
@@ -88,6 +114,16 @@ export async function Shell({ ctx, children }: { ctx: GuardContext; children: Re
               }
             >
               {alerts === 'failing' ? 'Alerts: not getting through' : 'Alerts: status unknown'}
+            </Link>
+          )}
+          {backups && (
+            <Link
+              href="/backups"
+              className="badge badge-note"
+              role="status"
+              title="Backups need attention"
+            >
+              {backups}
             </Link>
           )}
           {others.map((o) => (

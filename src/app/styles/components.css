@@ -8,6 +8,10 @@
   font-size: var(--text-sm);
   text-align: center;
 }
+.banner-hosted {
+  border-bottom: calc(var(--rule-width) * 3) solid var(--ink);
+  letter-spacing: 0.02em;
+}
 .app-header {
   background: var(--surface);
   border-bottom: var(--rule-width) solid var(--rule-strong);

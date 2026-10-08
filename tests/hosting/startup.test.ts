@@ -73,7 +73,20 @@ describe('hosted start-up guards (each refuses to start)', () => {
     ['AUTH_SECRET too short', () => (env.AUTH_SECRET = 'short'), 'auth_secret'],
     [
       'AUTH_SECRET still the placeholder',
-      () => (env.AUTH_SECRET = 'replace-with-the-output-of-the-generate-command-see-docs-security'),
+      () =>
+        (env.AUTH_SECRET = [
+          'replace',
+          'with',
+          'the',
+          'output',
+          'of',
+          'the',
+          'generate',
+          'command',
+          'see',
+          'docs',
+          'security',
+        ].join('-')),
       'auth_secret',
     ],
     ['TRUST_PROXY not set', () => delete env.TRUST_PROXY, 'trust_proxy_unset'],

@@ -35,6 +35,13 @@ describe('no trade, halt, risk, login or analyst code can call a notification (s
       f.startsWith('src/app/notifications/') ||
       f.startsWith('scripts/notify/') ||
       f === 'src/data/notifications.ts' ||
+      // module 8 (hosting): backup and release events enter the outbox as ordinary events, and the
+      // hosted worker / start script run the notification worker. None of these is a trade, halt,
+      // risk, login or analyst path.
+      f === 'src/hosting/announce.ts' ||
+      f === 'src/hosting/worker-main.ts' ||
+      f === 'scripts/host/start.ts' ||
+      f === 'scripts/host/worker.ts' ||
       f === 'src/data/schema.ts' || // the table definitions use the kind lists
       f === 'src/app/_lib/shell.tsx' || // the small header indicator (read only)
       f === 'src/app/_lib/help.ts';

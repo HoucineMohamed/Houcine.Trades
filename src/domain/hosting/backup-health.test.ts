@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { BACKUP_STALE_MS, backupIsProblem, backupState, needsStaleNotice } from './backup-health';
+import {
+  BACKUP_ERROR_WORDS,
+  BACKUP_HEADER_WORDS,
+  BACKUP_STALE_MS,
+  BACKUP_STATE_WORDS,
+  backupIsProblem,
+  backupState,
+  needsStaleNotice,
+} from './backup-health';
+import { BACKUP_ERROR_CODES } from './kinds';
 
 const NOW = new Date('2026-10-08T12:00:00Z');
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
@@ -53,5 +62,20 @@ describe('the stale notice', () => {
       false,
     ); // first hours
     expect(needsStaleNotice({ ...base, lastSuccessAt: 'junk' })).toBe(false); // unknown is shown, not announced
+  });
+});
+
+describe('words', () => {
+  it('every state and every error code has plain words (adding one without words fails here)', () => {
+    for (const s of Object.keys(BACKUP_STATE_WORDS)) expect(BACKUP_HEADER_WORDS).toHaveProperty(s);
+    for (const c of BACKUP_ERROR_CODES) expect(BACKUP_ERROR_WORDS[c].length).toBeGreaterThan(10);
+  });
+  it('no advice or judging words', () => {
+    const all = [
+      ...Object.values(BACKUP_STATE_WORDS),
+      ...Object.values(BACKUP_HEADER_WORDS),
+      ...Object.values(BACKUP_ERROR_WORDS),
+    ].join(' ');
+    expect(all).not.toMatch(/\b(good|bad|should|must|great|terrible)\b/i);
   });
 });
