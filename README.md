@@ -7,7 +7,7 @@ bots. **Modules 1 to 5 are built**: journal, stats, risk engine, **single-owner 
 > ## Login exists, but hosting does not
 >
 > Every page needs your login. The app still listens on 127.0.0.1 only (your own computer).
-> **Do not change the host setting or deploy it** until module 8 (HTTPS, backups): read
+> **Do not change the host setting or expose it yourself.** Putting it online is module 8; follow `docs/deploy.md`, and read
 > [docs/security.md](docs/security.md) first. Read `CLAUDE.md` for the rules and `docs/` for
 > architecture and roadmap.
 
@@ -155,8 +155,8 @@ After pulling module 2, run `npm run db:migrate` once: it adds the frozen `initi
 existing database and fills it for trades that are already open or closed.
 
 The database is a single file (`data/houcine-trades.db` by default, set by `DATABASE_URL`). It is
-gitignored and contains your trade data: never commit it. Until backups exist (module 8), copy
-that file (with the app stopped) if the data matters.
+gitignored and contains your trade data: never commit it. On your own computer, copy
+that file (with the app stopped) if the data matters. The hosted app (`docs/deploy.md`) backs itself up.
 
 | Command               | When                                                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------- |

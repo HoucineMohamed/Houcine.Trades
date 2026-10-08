@@ -18,19 +18,20 @@ Alerts send a short message to your phone (through Telegram) when something impo
 
 ## What events are announced
 
-| Group    | Event                                                                                      | Strength                                     |
-| -------- | ------------------------------------------------------------------------------------------ | -------------------------------------------- |
-| Risk     | a limit used 50 %, 80 % or 100 % (daily loss, open risk, open trades, drawdown)            | info, warning, critical                      |
-| Risk     | a halt started (daily loss, drawdown, by hand)                                             | critical, critical, warning                  |
-| Risk     | a halt ended                                                                               | info                                         |
-| Risk     | a refused drawdown reset, an override, a trade that breaks a rule logged                   | warning                                      |
-| Security | repeated failed sign-ins (one summary per 15 minutes), a throttle started                  | warning                                      |
-| Security | a successful sign-in                                                                       | info                                         |
-| Security | a recovery code used                                                                       | critical                                     |
-| Security | password or security settings changed, "sign out everywhere", a failed fresh-code check    | warning                                      |
-| Analyst  | a cap at 80 % or 100 %, a failed call                                                      | warning, info                                |
-| System   | "Alerts were switched off" (one last message), a test message, "N more events are waiting" | critical, info, info                         |
-| System   | backup failed, market data out of date                                                     | reserved: defined, nothing produces them yet |
+| Group    | Event                                                                                                                                     | Strength                                         |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Risk     | a limit used 50 %, 80 % or 100 % (daily loss, open risk, open trades, drawdown)                                                           | info, warning, critical                          |
+| Risk     | a halt started (daily loss, drawdown, by hand)                                                                                            | critical, critical, warning                      |
+| Risk     | a halt ended                                                                                                                              | info                                             |
+| Risk     | a refused drawdown reset, an override, a trade that breaks a rule logged                                                                  | warning                                          |
+| Security | repeated failed sign-ins (one summary per 15 minutes), a throttle started                                                                 | warning                                          |
+| Security | a successful sign-in                                                                                                                      | info                                             |
+| Security | a recovery code used                                                                                                                      | critical                                         |
+| Security | password or security settings changed, "sign out everywhere", a failed fresh-code check                                                   | warning                                          |
+| Analyst  | a cap at 80 % or 100 %, a failed call                                                                                                     | warning, info                                    |
+| System   | "Alerts were switched off" (one last message), a test message, "N more events are waiting"                                                | critical, info, info                             |
+| System   | (hosted app) a backup finished or failed, no verified backup for a day and a half, a database update applied or failed, a backup restored | info, warning, warning, info / critical, warning |
+| System   | market data out of date                                                                                                                   | reserved: defined, nothing produces it yet       |
 
 Events are **derived** from records that already exist (the risk log, the sign-in log, the analyst usage
 log) and from the limits' current usage. Nothing inside the risk, sign-in or analyst code sends them.

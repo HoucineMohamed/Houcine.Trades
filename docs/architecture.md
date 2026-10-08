@@ -245,13 +245,43 @@ Full plain-language description in `docs/notifications.md`. In short:
 - Tables `notification_settings` (one row), `notification_state` (watermarks, last levels), append-only
   `notification_events` and `notification_deliveries` (migration 0005; short codes only). Master-switch and
   settings changes are logged in `auth_events` (rebuilt again, with its triggers re-created).
-- Runs from `npm run notify:worker` (module 8 will run it as a service) and the guarded buttons. No timer in
-  the web server.
+- Runs from `npm run notify:worker` (hosted: the worker process under the supervisor, see Hosting below) and
+  the guarded buttons. No timer in the web server.
 
-## Data and hosting
+## Hosting and backups (module 8)
 
-SQLite needs a persistent disk, so 24/7 hosting later means a small VPS or similar, not
-serverless. `better-sqlite3` is a native module (`serverExternalPackages` in `next.config.ts`).
+Beginner guide: `docs/deploy.md`. SQLite needs a persistent disk and a single writer, so the hosted app is
+ONE container on ONE instance (managed platform, EU region, persistent disk), not serverless.
+`better-sqlite3` is a native module (`serverExternalPackages` in `next.config.ts`).
+
+- **One image, two processes.** `Dockerfile` (digest-pinned Node 22, build on the full image, run on the slim
+  one, no dev dependencies, started as root only to fix the disk's ownership then dropped to the `node`
+  user by `docker-entrypoint.sh`). `scripts/host/start.ts` (`npm run host:start`) runs `src/hosting/boot.ts`:
+  start-up rules, a staged restore if one waits, the RELEASE step, the rules again, then either setup mode or
+  the supervisor (`src/hosting/supervisor.ts`) with the web server (`next start -H 0.0.0.0 -p $PORT`) and the
+  worker (`scripts/host/worker.ts`). Every step fails closed and spawns nothing on failure. Local `npm start`
+  still binds to 127.0.0.1.
+- **Pure rules** in `src/domain/hosting/`: start-up rules, retention (7 daily, 4 weekly, 6 monthly, 5
+  pre-migration, never the newest), backup health (36 hours), schedule (daily, retry every 30 minutes), mount
+  table parsing, crash policy, log redaction.
+- **Backups** (`src/hosting/backup.ts`): SQLite's online backup to a private file, integrity check, gzip, then
+  AES-256-GCM with a per-backup HKDF key from `BACKUP_KEY` (`crypto.ts`, built-in crypto only), upload to any
+  S3-compatible store (`object-store.ts`, `fetch` plus a hand-written SigV4 signer in `sigv4.ts`, tested
+  against Amazon's published examples), then a read-back check. Only a checked backup counts. Each attempt
+  is an append-only row in `backup_runs` (migration 0006) and, while alerts are on, an event in the existing
+  outbox (new system kinds registered in `src/domain/notifications`).
+- **Release step** (`release.ts`): the only place migrations run. New disk: migrate. Pending migrations: a
+  verified pre-migration backup first, then migrate in one transaction, then check. A database from a NEWER
+  app is refused. Failure leaves the old database untouched and the container stops.
+- **Restore** (`restore.ts`): stage into a NEW file next to the database (decrypt, integrity, migrations
+  check), apply only at the next start before anything opens the database; the old file is kept.
+- **Identity.** `HOSTED=true` makes every request count as HTTPS (`src/auth/hosted.ts`), so cookies are
+  `Secure` with `__Host-` and HSTS is always sent. The client address is the LAST `X-Forwarded-For` entry
+  (the one the platform appends). `/healthz` is the only public route besides `/login`.
+- **Status:** `/backups` page, header badges, `GET /healthz` (database readable and the worker's sign of life
+  fresh; answers only `ok` or `not ok`).
+- Tests use a fake object store (`tests/helpers/object-store.ts`) and fake processes
+  (`tests/helpers/fake-child.ts`); the container is proven by `scripts/ci/container-smoke.sh` in CI.
 
 ## Testing
 

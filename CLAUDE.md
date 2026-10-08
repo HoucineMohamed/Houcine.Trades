@@ -6,7 +6,7 @@ It will run online 24/7 later. The owner is a trading beginner, so **correctness
 more than speed**. Built module by module (see `docs/roadmap.md`).
 
 Status: modules 1 (data model and journal), 2 (stats engine), 3 (risk engine), 4
-(authentication), 5 (dashboard UI), 6 (Claude analyst v1, journal coach) and 7 (notifications) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
+(authentication), 5 (dashboard UI), 6 (Claude analyst v1, journal coach), 7 (notifications) and 8 (hosting and backups: prepared, not yet deployed) are built: accounts, setups and trades in SQLite, pure validation, repositories, a
 minimal functional UI, a pure stats engine (`/stats`), a pure risk engine (`/risk`) that approves or
 refuses trade plans, sizes positions and can halt trading, and single-owner login (password +
 authenticator code), and a calm dashboard UI (the "Ledger" design), and an AI analyst that only reviews and explains (`/analyst`, see
@@ -14,9 +14,11 @@ authenticator code), and a calm dashboard UI (the "Ledger" design), and an AI an
 `docs/notifications.md`). No other integrations yet. Every statistic is explained in `docs/stats-glossary.md`,
 every risk rule in `docs/risk-rules.md` and every protection in `docs/security.md`.
 
-> **Authentication exists, hosting does not.** The app still binds to localhost (`dev` and `start`
-> use 127.0.0.1) and must NOT be deployed or exposed until module 8 does HTTPS, `TRUST_PROXY` and
-> backups as listed in `docs/security.md`.
+> **Hosting is prepared, not done.** Locally the app binds to localhost (`dev` and `start` use
+> 127.0.0.1). The only supported way online is the container described in `docs/deploy.md` (managed
+> platform, HTTPS, persistent disk, encrypted off-platform backups). Never expose it any other way. Deploys
+> happen only from the default branch after CI is green, by the owner; Claude never deploys, never creates
+> an account, key or token, and never touches production.
 
 ## Stack
 
@@ -47,13 +49,17 @@ Next.js (App Router) + TypeScript (strict, `noUncheckedIndexedAccess`), SQLite v
 - `src/integrations/` `anthropic/` (the AI client interface, `fetch` client, env validation),
   `telegram/` (the channel interface, `fetch` adapter, env validation),
   `tradingview-mcp/`, `exchanges/` (future adapters)
+- `src/hosting/` server-only: the hosted container's logic (start-up checks, boot sequence, release step,
+  supervisor, backup, restore, S3 client and signer, logger, health). `src/domain/hosting/` is its pure
+  part. `scripts/host/` the entry points (`host:start`, worker, backup, restore, check, key generator),
+  `scripts/ci/container-smoke.sh` the container test, `Dockerfile`, `docker-entrypoint.sh`, `.dockerignore`
 - `src/bots/` future bots framework
 - `src/config/` env loading and the paper-mode guard
 - `tests/` cross-cutting tests; module tests may sit beside their code as `*.test.ts`
 - `docs/` `architecture.md`, `roadmap.md`
 
 Dependency direction: `app -> analyst, notifications, domain, data`; `analyst -> data, domain, integrations`;
-`notifications -> data, domain, integrations`;
+`notifications -> data, domain, integrations`; `hosting -> data, domain, notifications`;
 `data -> domain, config`; `integrations -> domain`;
 `bots -> domain, integrations`. `domain` imports from none of them.
 
@@ -71,6 +77,9 @@ Dependency direction: `app -> analyst, notifications, domain, data`; `analyst ->
   prints the key)
 - `npm run notify:worker` collect events and deliver alerts every 30 s until Ctrl+C;
   `npm run notify:set-telegram` put `TELEGRAM_BOT_TOKEN` into `.env` (hidden input) and pair the chat
+- Hosted app only (see `docs/deploy.md`): `npm run host:start` (the container's entry point),
+  `host:check` (the start-up rules, names only), `host:backup` (an extra verified backup),
+  `host:restore` (stage a restore; `-- --cancel` discards it), `backup:generate-key` (a new `BACKUP_KEY`)
 - `npm run auth:generate-secret` print a random `AUTH_SECRET`; `npm run auth:create-owner` create the
   one owner (real terminal only); `npm run auth:reset` reset password and authenticator
 
@@ -170,8 +179,8 @@ Five review agents live in `.claude/agents/` (details, license and attribution i
   - **Help texts come from the docs:** add a key in `_lib/help.ts` pointing at a heading in
     `docs/stats-glossary.md` or `docs/risk-rules.md`; never write help text in a component. Renaming a
     doc heading breaks the test on purpose.
-  - Every page keeps PAPER and any halt visible in the header (the shell does it); the LOCALHOST ONLY
-    banner stays until module 8. Do not put block elements (`div`, `details`) inside `<p>`.
+  - Every page keeps PAPER and any halt visible in the header (the shell does it); locally the LOCALHOST
+    ONLY banner stays, and when hosted "HOSTED, PAPER MODE" replaces it. Do not put block elements (`div`, `details`) inside `<p>`.
   - The demo seed (`npm run dev:seed`) may only run on a file whose name contains "demo" and never on
     the real journal; its guard is tested. Demo data and screenshots are never committed.
 - Analyst rules (module 6), details in `docs/analyst.md`:
@@ -226,6 +235,27 @@ Five review agents live in `.claude/agents/` (details, license and attribution i
     after 24 hours (cancel by asking for the louder setting). Critical events are never switched off. All
     changes are logged in `auth_events`.
   - Tests use the fake channel (`tests/helpers/notifications.ts`); test tokens are built at run time.
+- Hosting rules (module 8), details in `docs/deploy.md` and `docs/security.md`:
+  - **Fail closed, spawn nothing.** `src/hosting/boot.ts` runs, in order: start-up rules, a staged restore,
+    the release step, the rules again, then setup mode or the supervisor. A refusal exits non-zero after a
+    pause and starts nothing. Migrations run ONLY in the release step and ONLY after a verified backup;
+    a failed backup or migration leaves the old database untouched.
+  - **Backups are encrypted on the server before they leave it** (AES-256-GCM, per-backup HKDF key from
+    `BACKUP_KEY`, built-in crypto only), never a raw copy of a live file (SQLite online backup), stored
+    off the platform, and counted only after a read-back check. `BACKUP_KEY` is never `AUTH_SECRET` and is
+    never stored with a backup. Retention never deletes the newest backup (random-input test). The
+    platform's own disk snapshot is an extra, never a replacement.
+  - **No web setup or reset.** The owner is created in the platform's shell with `npm run auth:create-owner`.
+    Without an owner only `/healthz` answers (setup mode). `/healthz` returns `ok` or `not ok` and nothing
+    else; it is the only public route besides `/login` (allowlisted in the discovery test).
+  - **`HOSTED=true` means HTTPS always** (`src/auth/hosted.ts`): Secure `__Host-` cookie, HSTS. The client
+    address is the LAST `X-Forwarded-For` entry only. `TRUST_PROXY` must be set explicitly when hosted.
+  - **Logs** go through `src/domain/hosting/redact.ts` (the supervisor also redacts child output). Never
+    log a secret, token, cookie, credentialed URL or request body. No literal key-looking value in the
+    repository, tests included (assemble test credentials at run time).
+  - A restore never swaps under a running app: stage, then apply at the next start (expires after 6 h).
+  - `tsx` is a production dependency on purpose (the scripts run TypeScript directly). Any further new
+    dependency still needs the owner's approval (rule 8).
 - Hand-written SQL in migrations is not tracked by drizzle-kit: the triggers protecting
   `initial_stop_loss` (`0001`), `closed_recorded_at` and the append-only `risk_events` /
   `risk_verdicts` (`0002`), and the auth triggers (`0003`: single owner, append-only `auth_events`,
@@ -233,7 +263,10 @@ Five review agents live in `.claude/agents/` (details, license and attribution i
   `auth_events` (three new event kinds) and re-created its two triggers, and added the append-only
   `ai_usage` / `ai_reviews` and the undeletable `ai_settings` row. Migration `0005` rebuilt `auth_events`
   AGAIN (three notification kinds), re-created its two triggers, and added the append-only
-  `notification_events` / `notification_deliveries` and the undeletable `notification_settings` row. A future migration that rebuilds a table must re-create its triggers;
+  `notification_events` / `notification_deliveries` and the undeletable `notification_settings` row. Migration
+  `0006` added the append-only `backup_runs` and REBUILT `notification_events` and `notification_deliveries`
+  child-first (the migrator runs in one transaction, so `PRAGMA foreign_keys` cannot be switched off) to
+  accept the new system kinds, re-creating their triggers. A future migration that rebuilds a table must re-create its triggers;
   tests list every trigger and fail if one is missing.
 - Schema changes: edit `src/data/schema.ts`, run `npm run db:generate`, commit the new file in
   `drizzle/`. CI fails if the schema and migrations disagree.

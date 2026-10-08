@@ -93,8 +93,23 @@ Modules are built in this order, each on its own branch with tests and small com
    at-least-once (one message may repeat after a crash); no price or market alerts (no market data); other
    channels are only the interface; the worker is a script until module 8 runs it as a service; a held-back
    event older than 24 h expires and is never sent.
-8. **24/7 deployment and backups**: hosting (persistent disk for SQLite), HTTPS, automated
-   encrypted backups, restore test.
+8. **24/7 deployment and backups** - **DONE (prepared; you deploy)**: a digest-pinned, non-root container
+   with no dev dependencies; one supervisor for the web server and the worker (restart on crash, bounded
+   crash loop, clean SIGTERM, hung-worker restart); fail-closed start-up rules (secrets, paper mode, proxy
+   setting, mounted disk, backup settings, owner, migrations); a RELEASE step that takes a verified backup
+   and only then migrates; setup mode (health check only) until the owner exists; `HOSTED=true` forces
+   HTTPS cookies and HSTS; client address from the LAST `X-Forwarded-For` entry; a public `/healthz`
+   (`ok` or `not ok`); daily and pre-migration backups, encrypted on the server (AES-256-GCM, `BACKUP_KEY`),
+   stored in any S3-compatible EU store through a hand-written, vector-tested signer, verified by
+   read-back, with a tested retention policy; a restore that stages into a new file and swaps only at the
+   next start; structured, redacted logs; a `/backups` page and header warnings; backup and migration events
+   through the existing alerts; a CI job that builds the image and smoke-tests it; `docs/deploy.md`.
+   _Done when_: the repository holds everything needed to deploy and the guard, step-up and security
+   tests still pass (they do). Carried forward: **nothing has been deployed and no real storage provider
+   has been called**; Render prices, shell behaviour and the exact client-address header are unconfirmed
+   (checklist in `docs/deploy.md`, section 4); the first real backup is the live test of the storage
+   provider; daily backups mean up to a day of entries can be lost (use `npm run host:backup` for more);
+   a restore needs a restart; no zero-downtime deploys with a disk.
 9. **Exchange adapter (testnet)** with confirm button and kill switch (**no override: orders must pass
    `requireApprovedForExecution`**): every order needs explicit
    confirmation and a stop-loss. Keys are trade-only with withdrawals disabled.
@@ -103,11 +118,11 @@ Modules are built in this order, each on its own branch with tests and small com
 
 ## Required before the relevant step
 
-- **Authentication (module 4) before any hosting or network exposure** - built. The app still binds
-  to 127.0.0.1 only; `docs/security.md` lists what module 8 must do (HTTPS, proxy and
-  `TRUST_PROXY`, backups, `AUTH_SECRET`).
-- **Backups (module 8):** until then the SQLite file in `data/` is the only copy of the journal.
-  Copy `data/houcine-trades.db` (with the app stopped) if the data matters.
+- **Authentication (module 4) before any hosting or network exposure** - built. Locally the app still
+  binds to 127.0.0.1 only; the hosted container binds as the platform requires and refuses to start
+  unless its start-up rules pass (`docs/security.md`, `docs/deploy.md`).
+- **Backups:** on your own computer the SQLite file in `data/` is still the only copy of the journal
+  (copy it with the app stopped). The hosted app backs itself up (module 8).
 - **Secret scanning:** gitleaks runs in CI (`secret-scan` job), next to a built-in test
   (`tests/security/secret-scan.test.ts`) and an optional pre-commit hook. **It must be green before
   any real API key is used**, at the latest before module 6 (Claude/TradingView keys) and

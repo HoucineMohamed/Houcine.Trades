@@ -1,8 +1,7 @@
 # Security (module 4: authentication)
 
 Plain-language guide to every protection in the app and why it exists. The app is for ONE owner
-(you). It still runs on your own computer only (`127.0.0.1`); this module makes it safe to host
-later (module 8), but **nothing here configures hosting**.
+(you). On your own computer it runs on `127.0.0.1` only. Module 8 (hosting) is described near the end.
 
 ## The short version
 
@@ -144,29 +143,56 @@ Plain-language version: `docs/notifications.md`. The protections, all tested:
   nothing sensitive is ever in them); delivery is at-least-once; the first real Telegram call was not tested
   and some Telegram facts are unconfirmed (see `docs/notifications.md`).
 
-## What module 8 (hosting) must do
+## Hosting and backups (module 8)
 
-This module does not configure hosting. Before exposing the app:
+Plain-language version: `docs/deploy.md`. The list this module had to do, and what was done:
 
-1. **HTTPS only**, with a certificate (reverse proxy such as Caddy or nginx). The app then sets
-   `Secure`, the `__Host-` cookie name and HSTS by itself when it sees HTTPS.
-2. Put the app behind that proxy, bound to `127.0.0.1`; the proxy forwards `Host`, `X-Forwarded-For`
-   and `X-Forwarded-Proto`. Only then set `TRUST_PROXY=true` in `.env` (otherwise an attacker could
-   forge their address and dodge the per-source limit). The proxy must **overwrite**, not append
-   to, `X-Forwarded-*` headers from the internet, and must preserve the `Host` header.
-3. Back up the SQLite file **and** `AUTH_SECRET` (separately; the file alone cannot be used to
-   sign in or to read the authenticator secret).
-4. Keep `.env` readable only by the app's user. Never put secrets in the repository.
-5. Think about a second pair of eyes: GitHub branch protection, 2FA on the GitHub account and on the
-   hosting account.
+1. [x] **HTTPS only.** The platform terminates HTTPS. When `HOSTED=true` the app counts every request as
+       HTTPS: cookies are `Secure`, `HttpOnly`, `SameSite=Strict` with the `__Host-` prefix, HSTS is always
+       sent, and a client cannot downgrade this with a header (tests). Local use is unchanged.
+2. [x] **Behind a proxy, client address.** `TRUST_PROXY` must be set explicitly (`true` or `false`) or the
+       hosted app refuses to start. The client address is the LAST `X-Forwarded-For` entry, the one the
+       platform appends (Render appends rather than replaces, so the first entries can be forged); forged
+       entries and other address headers (`X-Real-IP`, `True-Client-IP`, `CF-Connecting-IP`, `Forwarded`) are
+       ignored (tests). Per-source rate limiting therefore works. **To confirm on the first deploy:** that the
+       address the app sees really is the visitor's (`docs/deploy.md`, section 9).
+3. [x] **Backups of the database and of `AUTH_SECRET`.** Daily and before every database update, encrypted
+       on the server before upload, stored off the platform (any S3-compatible EU store), verified by read-back.
+       `BACKUP_KEY` is separate from `AUTH_SECRET`, never stored with a backup, and the app refuses to start if
+       they are equal. `AUTH_SECRET` itself is NOT inside any backup (the file alone cannot sign anyone in or
+       read the authenticator secret): keep it in your password manager. **Keep a copy of `BACKUP_KEY` in your
+       password manager as well: without it no backup can be read.**
+4. [x] **Secrets only in the platform's secret store**, never in the repository, the image or a log (the
+       image is built from a `.dockerignore`d context and a smoke test plants decoys; a log redactor and tests
+       cover secrets, tokens, cookies, credentialed URLs and request bodies; the secret scan covers every new file).
+5. [x] **A second pair of eyes.** Deploys happen only from the default branch after CI is green ("After CI
+       checks pass"); never from a `claude/...` branch. GitHub branch protection and 2-step login on GitHub and
+       Render remain **your** settings: `docs/deploy.md` lists them.
+
+Start-up rules (the hosted app refuses to start, and spawns nothing, unless they all pass): production
+mode, `TRADING_MODE=paper`, a valid non-placeholder `AUTH_SECRET`, `TRUST_PROXY` set, `DATA_DIR` a real
+writable mount with the database inside it, `BACKUP_KEY` and the storage settings valid, the owner exists
+(otherwise only `/healthz` answers, "setup mode", so the shell can create the owner), and no migration
+pending after the release step. Migrations run ONLY in the release step, after a verified backup.
+
+- **No web sign-up, setup or reset.** The owner is created and reset only by `npm run auth:create-owner`
+  and `auth:reset` in the platform's shell. If the shell is root, the scripts step down to the app user first.
+- **`/healthz`** is the only public route besides `/login`. It answers `ok` or `not ok` and nothing else
+  (no version, no detail), and is on the allowlist in the guard discovery test.
+- **Restore** never swaps a database under a running app: it stages into a new file (decrypt, integrity and
+  migrations check), and the swap happens at the next start; the old file is kept; a staged restore expires
+  after 6 hours and can be cancelled.
+- Known limits: the platform's own disk snapshots (daily) are an extra, not a replacement; daily backups mean
+  up to a day of entries can be lost (the pre-migration backup protects every update); a person with shell
+  access can read `AUTH_SECRET` and `BACKUP_KEY` from the environment, so protect the Render and GitHub accounts.
 
 ## Known limits (honest list)
 
 - Anyone who has your **password, your phone and the database file with `AUTH_SECRET`** can sign
   in. That is the point of multiple factors; guard the phone and the server.
 - Rate limiting without `TRUST_PROXY` treats every visitor as one source (the global limit still
-  applies). That is fine on localhost; module 8 must set it up properly.
-- An attacker who can run code on the server can read `AUTH_SECRET` from the environment. Host
-  hardening is module 8's job.
+  applies). That is fine on localhost; the hosted app must set it (it refuses to start otherwise).
+- An attacker who can run code on the server can read `AUTH_SECRET` and `BACKUP_KEY` from the environment.
+  Protect the hosting and GitHub accounts like the app itself.
 - No passkeys, no multiple users, no email or SMS: out of scope by design.
 - The risk engine, journal and stats are unchanged by this module; only who may use them changed.
