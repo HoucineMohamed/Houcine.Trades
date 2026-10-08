@@ -32,6 +32,17 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # Builds the hosted image and starts it with a temporary volume (module 8). See
+  # scripts/ci/container-smoke.sh for everything it proves. Deploys happen only from the default branch
+  # after this job and `check` are green (Render: "Auto-Deploy: After CI Checks Pass").
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image and run the container smoke test
+        run: bash scripts/ci/container-smoke.sh
+
   secret-scan:
     runs-on: ubuntu-latest
     steps:

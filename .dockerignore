@@ -1,0 +1,47 @@
+# Nothing private or local may enter the image (rule 1 and 2). The container smoke test plants a
+# decoy .env and a decoy database and proves they are not in the image.
+
+# secrets (everything but the placeholder template)
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+
+# the database and any trade data, including SQLite side files
+# (only the top-level data folder: src/data is code)
+data
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite3
+**/*.sqlite-*
+
+# version control, editor and tool files
+.git
+.gitignore
+.github
+.githooks
+.claude
+.vscode
+.idea
+
+# build output and dependencies are rebuilt inside the image
+node_modules
+.next
+out
+coverage
+*.tsbuildinfo
+next-env.d.ts
+
+# logs, OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# tests and docs that are not read at run time stay out (docs/ IS needed: the help texts come from it)
+tests
+**/*.test.ts
+**/*.test.tsx
+Dockerfile
+.dockerignore

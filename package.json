@@ -24,7 +24,12 @@
     "notify:worker": "tsx --conditions=react-server scripts/notify/worker.ts",
     "notify:set-telegram": "tsx --conditions=react-server scripts/notify/set-telegram.ts",
     "ai:set-key": "tsx --conditions=react-server scripts/ai/set-key.ts",
-    "dev:seed": "tsx --conditions=react-server scripts/dev/seed.ts"
+    "dev:seed": "tsx --conditions=react-server scripts/dev/seed.ts",
+    "host:start": "tsx --conditions=react-server scripts/host/start.ts",
+    "host:check": "tsx --conditions=react-server scripts/host/check.ts",
+    "host:backup": "tsx --conditions=react-server scripts/host/backup.ts",
+    "host:restore": "tsx --conditions=react-server scripts/host/restore.ts",
+    "backup:generate-key": "tsx --conditions=react-server scripts/host/generate-backup-key.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",
@@ -39,6 +44,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "server-only": "^0.0.1",
+    "tsx": "^4.23.15",
     "uqr": "^0.1.3",
     "zod": "^4.6.5"
   },
@@ -51,7 +57,6 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.8",
     "prettier": "^3.9.9",
-    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^5.0.3"
   }
