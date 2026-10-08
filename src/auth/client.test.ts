@@ -46,3 +46,50 @@ describe('who is calling (for rate limits and logs)', () => {
     expect(GLOBAL_BUCKET).toBe('global');
   });
 });
+
+describe('a spoofed client address cannot dodge the per-source limit (hosted behind one platform proxy)', () => {
+  // The platform APPENDS the connecting address to what the client sent, so only the LAST entry is trusted.
+  it.each([
+    ['one hop', '203.0.113.9', '203.0.113.9'],
+    ['a forged first entry', '10.0.0.1, 203.0.113.9', '203.0.113.9'],
+    ['many forged entries', '1.1.1.1,2.2.2.2 , 3.3.3.3,  203.0.113.9', '203.0.113.9'],
+    ['a forged private address first', '127.0.0.1, 203.0.113.9', '203.0.113.9'],
+    ['IPv6', '1.1.1.1, 2001:db8::7', '2001:db8::7'],
+  ])('%s', (_n, xff, expected) => {
+    expect(clientInfoFromHeaders(headers({ 'x-forwarded-for': xff }), true).ip).toBe(expected);
+  });
+
+  it('other "client address" headers are never read, trusted or not', () => {
+    const spoof = {
+      'x-real-ip': '6.6.6.6',
+      'true-client-ip': '6.6.6.6',
+      'cf-connecting-ip': '6.6.6.6',
+      'x-client-ip': '6.6.6.6',
+      forwarded: 'for=6.6.6.6',
+    };
+    expect(clientInfoFromHeaders(headers(spoof), true).ip).toBe('unknown');
+    expect(clientInfoFromHeaders(headers(spoof), false).ip).toBe('direct');
+    expect(
+      clientInfoFromHeaders(headers({ ...spoof, 'x-forwarded-for': '203.0.113.9' }), true).ip,
+    ).toBe('203.0.113.9');
+  });
+
+  it('a forged last entry (a client talking to the app without the proxy) is only ever one source: its own claim', () => {
+    // Without the platform proxy nobody can reach the app; this documents that the value is just a bucket key.
+    expect(clientInfoFromHeaders(headers({ 'x-forwarded-for': '6.6.6.6' }), true).ip).toBe(
+      '6.6.6.6',
+    );
+  });
+
+  it('a very long or odd-looking last entry is "unknown", never stored as text', () => {
+    for (const bad of ['1.1.1.1, ' + 'a'.repeat(60), '1.1.1.1, <b>', '1.1.1.1, 2.2.2.2; x']) {
+      expect(clientInfoFromHeaders(headers({ 'x-forwarded-for': bad }), true).ip, bad).toBe(
+        'unknown',
+      );
+    }
+    // only the characters of an address are ever kept (a trailing comma just ends the list)
+    expect(clientInfoFromHeaders(headers({ 'x-forwarded-for': '1.1.1.1,' }), true).ip).toBe(
+      '1.1.1.1',
+    );
+  });
+});

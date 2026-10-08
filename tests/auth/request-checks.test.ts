@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { buildCsp, checkOrigin, isPublicPath, securityHeaders } from '@/auth/request-checks';
 import { proxy } from '@/proxy';
 
@@ -127,5 +127,65 @@ describe('proxy.ts', () => {
       }),
     );
     expect(res.status).toBe(403);
+  });
+});
+
+describe('proxy.ts when hosted (HOSTED=true)', () => {
+  const req = (url: string, headers: Record<string, string> = {}) =>
+    new NextRequest(url, { headers });
+  afterEach(() => {
+    delete process.env.HOSTED;
+    delete process.env.TRUST_PROXY;
+  });
+
+  it('sends HSTS and upgrade-insecure-requests on every response, even if a client claims http', () => {
+    process.env.HOSTED = 'true';
+    const cases: Record<string, string>[] = [
+      {},
+      { 'x-forwarded-proto': 'http' },
+      { 'x-forwarded-proto': 'https' },
+    ];
+    for (const headers of cases) {
+      const res = proxy(req('http://app.internal:10000/login', headers));
+      expect(res.headers.get('strict-transport-security')).toContain('max-age=31536000');
+      expect(res.headers.get('content-security-policy')).toContain('upgrade-insecure-requests');
+    }
+  });
+
+  it('looks for the __Host- session cookie only: a planted plain-name cookie does not pass', () => {
+    process.env.HOSTED = 'true';
+    const planted = proxy(
+      req('http://app.internal:10000/trades', { cookie: 'houcine_session=planted' }),
+    );
+    expect(planted.status).toBe(303);
+    const real = proxy(
+      req('http://app.internal:10000/trades', { cookie: '__Host-houcine_session=abc' }),
+    );
+    expect(real.status).toBe(200);
+  });
+
+  it('the redirect and the 403 carry the security headers too', () => {
+    process.env.HOSTED = 'true';
+    const redirect = proxy(req('http://app.internal:10000/trades'));
+    expect(redirect.headers.get('strict-transport-security')).not.toBeNull();
+  });
+
+  it('NOT hosted (your own computer): no HSTS, plain cookie name, unchanged', () => {
+    const res = proxy(req('http://127.0.0.1:3000/login'));
+    expect(res.headers.get('strict-transport-security')).toBeNull();
+    const withCookie = proxy(
+      req('http://127.0.0.1:3000/trades', { cookie: 'houcine_session=abc' }),
+    );
+    expect(withCookie.status).toBe(200);
+  });
+
+  it('hosted is only the exact text "true"', () => {
+    for (const v of ['TRUE', '1', 'yes', ' true', '']) {
+      process.env.HOSTED = v;
+      expect(
+        proxy(req('http://127.0.0.1:3000/login')).headers.get('strict-transport-security'),
+        v,
+      ).toBeNull();
+    }
   });
 });

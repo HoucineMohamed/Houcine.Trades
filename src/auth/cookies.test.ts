@@ -45,6 +45,32 @@ describe('session cookie', () => {
     expect(isHttpsRequest(headers({ 'x-forwarded-proto': 'HTTPS, http' }), null, true)).toBe(true);
   });
 
+  it('hosted: every request is HTTPS, whatever the headers say (no spoofed downgrade)', () => {
+    for (const proto of [undefined, 'http', 'https', 'HTTP, https']) {
+      const h: Record<string, string> = proto ? { 'x-forwarded-proto': proto } : {};
+      for (const trust of [true, false]) {
+        for (const protocol of ['http:', 'https:', null]) {
+          expect(
+            isHttpsRequest(headers(h), protocol, trust, true),
+            `${proto} ${trust} ${protocol}`,
+          ).toBe(true);
+        }
+      }
+    }
+    expect(isHttpsRequest(headers({}), 'http:', false, false)).toBe(false); // not hosted: unchanged
+  });
+
+  it('hosted cookie: Secure, HttpOnly, SameSite=Strict, __Host- prefix, Path=/, no Domain', () => {
+    expect(sessionCookieName(true)).toBe('__Host-houcine_session');
+    expect(sessionCookieAttributes(true, 3_600_000)).toEqual({
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: true,
+      path: '/',
+      maxAge: 3600,
+    });
+  });
+
   it('over HTTPS only the __Host- cookie is believed (a plain-name cookie could be planted by an insecure page)', () => {
     expect(readSessionToken(jar({ [SESSION_COOKIE_SECURE]: 'a-token' }), true)).toBe('a-token');
     expect(readSessionToken(jar({ [SESSION_COOKIE_PLAIN]: 'planted' }), true)).toBeNull();

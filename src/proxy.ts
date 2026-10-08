@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { buildCsp, checkOrigin, isPublicPath, securityHeaders } from '@/auth/request-checks';
 import { SESSION_COOKIE_PLAIN, SESSION_COOKIE_SECURE } from '@/auth/cookie-names';
+import { isHosted } from '@/auth/hosted';
 
 /**
  * First, cheap line of defence. It is NOT the security boundary: every page, action and route
@@ -12,6 +13,7 @@ import { SESSION_COOKIE_PLAIN, SESSION_COOKIE_SECURE } from '@/auth/cookie-names
  */
 export function proxy(request: NextRequest) {
   const https =
+    isHosted() ||
     request.nextUrl.protocol === 'https:' ||
     (process.env.TRUST_PROXY === 'true' &&
       (request.headers.get('x-forwarded-proto') ?? '').split(',')[0]?.trim() === 'https');

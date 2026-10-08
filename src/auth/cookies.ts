@@ -15,6 +15,7 @@ import type { HeaderReader } from './client';
  */
 
 import { SESSION_COOKIE_PLAIN, SESSION_COOKIE_SECURE } from './cookie-names';
+import { isHosted } from './hosted';
 
 export { SESSION_COOKIE_PLAIN, SESSION_COOKIE_SECURE };
 
@@ -22,7 +23,9 @@ export function isHttpsRequest(
   headers: HeaderReader,
   requestProtocol: string | null,
   trustProxy: boolean,
+  hosted: boolean = isHosted(),
 ): boolean {
+  if (hosted) return true; // the hosted app is HTTPS only (see hosted.ts)
   if (requestProtocol === 'https:' || requestProtocol === 'https') return true;
   return (
     trustProxy &&
