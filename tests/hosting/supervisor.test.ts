@@ -1,42 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createLogger } from '@/hosting/logger';
-import {
-  Supervisor,
-  type ChildProcessLike,
-  type ChildSpec,
-  type SupervisorOptions,
-} from '@/hosting/supervisor';
-
-class FakeChild implements ChildProcessLike {
-  signals: string[] = [];
-  private exitCb: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
-  private stdoutCb: ((c: string) => void) | null = null;
-  private stderrCb: ((c: string) => void) | null = null;
-  stdout = {
-    on: (_e: 'data', cb: (c: Buffer | string) => void) => {
-      this.stdoutCb = cb as (c: string) => void;
-    },
-  };
-  stderr = {
-    on: (_e: 'data', cb: (c: Buffer | string) => void) => {
-      this.stderrCb = cb as (c: string) => void;
-    },
-  };
-  kill(signal: NodeJS.Signals) {
-    this.signals.push(signal);
-    return true;
-  }
-  on(event: string, cb: never) {
-    if (event === 'exit') this.exitCb = cb;
-    return this;
-  }
-  exit(code: number | null = 1, signal: NodeJS.Signals | null = null) {
-    this.exitCb?.(code, signal);
-  }
-  say(text: string, stream: 'out' | 'err' = 'out') {
-    (stream === 'out' ? this.stdoutCb : this.stderrCb)?.(text);
-  }
-}
+import { Supervisor, type ChildSpec, type SupervisorOptions } from '@/hosting/supervisor';
+import { FakeChild } from '../helpers/fake-child';
 
 function setup(over: Partial<SupervisorOptions> = {}) {
   let now = 1_000_000;
