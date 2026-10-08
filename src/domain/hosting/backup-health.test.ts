@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BACKUP_STALE_MS, backupIsProblem, backupState } from './backup-health';
+import { BACKUP_STALE_MS, backupIsProblem, backupState, needsStaleNotice } from './backup-health';
 
 const NOW = new Date('2026-10-08T12:00:00Z');
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
@@ -41,5 +41,17 @@ describe('backup state', () => {
     expect(
       (['ok', 'pending', 'last_failed', 'stale', 'never', 'unknown'] as const).map(backupIsProblem),
     ).toEqual([false, false, true, true, true, true]);
+  });
+});
+
+describe('the stale notice', () => {
+  it('goes out only after 36 hours really passed', () => {
+    expect(needsStaleNotice({ ...base, lastSuccessAt: ago(35 * H) })).toBe(false);
+    expect(needsStaleNotice({ ...base, lastSuccessAt: ago(37 * H) })).toBe(true);
+    expect(needsStaleNotice({ ...base })).toBe(true); // never, and expected for 100 hours
+    expect(needsStaleNotice({ ...base, trackingSince: ago(2 * H), lastFailureAt: ago(H) })).toBe(
+      false,
+    ); // first hours
+    expect(needsStaleNotice({ ...base, lastSuccessAt: 'junk' })).toBe(false); // unknown is shown, not announced
   });
 });

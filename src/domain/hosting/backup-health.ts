@@ -42,6 +42,18 @@ export function backupState(i: BackupHealthInput): BackupState {
   return 'ok';
 }
 
+/**
+ * Should the "no verified backup for a day and a half" notice go out? Only when 36 hours really have
+ * passed without one: a stale backup, or no backup at all since backups were expected.
+ */
+export function needsStaleNotice(i: BackupHealthInput): boolean {
+  const state = backupState(i);
+  if (state === 'stale') return true;
+  if (state !== 'never') return false;
+  const since = i.trackingSince === null ? Number.NaN : Date.parse(i.trackingSince);
+  return Number.isFinite(since) && i.now.getTime() - since > BACKUP_STALE_MS;
+}
+
 /** Shown in the header: everything except a healthy state and the first hours after setup. */
 export const backupIsProblem = (s: BackupState): boolean => s !== 'ok' && s !== 'pending';
 
