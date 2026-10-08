@@ -199,7 +199,9 @@ survive on the server. Use Render's environment instead:
     ```
 
     It asks for a password (hidden), shows a QR code for your authenticator app and gives 10 recovery
-    codes. Save the codes in your password manager. There is no web page for this on purpose.
+    codes. Save the codes in your password manager. There is no web page for this on purpose. (If the
+    shell is logged in as root, the script first steps down to the app's own user, so every file it
+    creates belongs to the app; it stops with a message if it cannot.)
     Within ten seconds the logs show `boot.owner_found` and then the web app and the worker start.
 
 11. Open your service address (the `https://...onrender.com` link). You should see the sign-in page and,
@@ -261,8 +263,15 @@ npm run host:restore
 It lists the backups, newest first. Choose number 1, then type `RESTORE` when asked. It downloads the
 backup, decrypts it (a wrong `BACKUP_KEY` or a damaged file is refused), runs an integrity check and a
 migrations check on a **new file**, and stages it. It prints "The backup is intact". Your running
-database is **not touched**. To forget the staged copy, simply do not restart; or run the command
-again and choose another backup.
+database is **not touched**. A staged restore is applied at the **next start of the service**, so if
+this was only a check, throw it away right away:
+
+```
+npm run host:restore -- --cancel
+```
+
+(A staged restore that is not applied within 6 hours is discarded by itself, so a forgotten one can
+never replace your database weeks later.)
 
 **Phase 2 - a full restore (do this once, with nothing important in the journal yet):**
 
