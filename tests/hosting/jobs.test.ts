@@ -7,6 +7,7 @@ import { createDatabase, migrateDatabase, type Db } from '@/data/client';
 import { generateBackupKey, parseBackupKey } from '@/hosting/crypto';
 import { createBackupJob } from '@/hosting/jobs';
 import { createLogger } from '@/hosting/logger';
+import { enableAlerts } from '../helpers/notifications';
 import { FakeObjectStore } from '../helpers/object-store';
 
 let dir: string;
@@ -44,6 +45,7 @@ beforeEach(() => {
   migrateDatabase(db);
   store = new FakeObjectStore();
   now = new Date('2026-10-08T03:00:00Z');
+  enableAlerts(db, new Date('2026-10-07T00:00:00Z'));
 });
 afterEach(() => {
   db.$client.close();

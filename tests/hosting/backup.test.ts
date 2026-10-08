@@ -10,6 +10,7 @@ import { applyRetention, runBackup, type BackupDeps } from '@/hosting/backup';
 import { generateBackupKey, parseBackupKey } from '@/hosting/crypto';
 import { createLogger } from '@/hosting/logger';
 import { StoreError } from '@/hosting/object-store';
+import { enableAlerts } from '../helpers/notifications';
 import { FakeObjectStore } from '../helpers/object-store';
 
 const SECRET_NOTE = 'my-very-private-account-name-zzq';
@@ -49,6 +50,7 @@ beforeEach(() => {
   store = new FakeObjectStore();
   key = parseBackupKey(generateBackupKey()) as Buffer;
   lines = [];
+  enableAlerts(db, new Date('2026-10-07T00:00:00Z'));
 });
 afterEach(() => {
   db.$client.close();
@@ -80,6 +82,15 @@ describe('a backup', () => {
     expect(eventKinds()).toEqual(['backup_succeeded']);
     expect(fs.readdirSync(path.join(dir, 'tmp'))).toEqual([]);
     expect(readBackupStatus(db).lastSuccessAt).toBe(NOW.toISOString());
+  });
+
+  it('with alerts OFF nothing is queued for later (only events from the moment alerts are on are announced)', async () => {
+    db.$client.exec('UPDATE notification_settings SET master = 0');
+    await runBackup(deps(), 'daily');
+    store.denyAll = true;
+    await runBackup(deps(), 'daily');
+    expect(eventKinds()).toEqual([]);
+    expect(listBackupRuns(db)).toHaveLength(2); // the Backups page and the log still have everything
   });
 
   it('keeps working while the live database is being written to (online snapshot)', async () => {

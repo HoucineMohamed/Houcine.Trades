@@ -9,6 +9,7 @@ import { generateBackupKey, parseBackupKey } from '@/hosting/crypto';
 import { createLogger } from '@/hosting/logger';
 import { migrationStatus } from '@/hosting/migrations';
 import { runRelease, type ReleaseDeps } from '@/hosting/release';
+import { enableAlerts } from '../helpers/notifications';
 import { FakeObjectStore } from '../helpers/object-store';
 import { folderUpTo, folderWithBrokenMigration, removeDir } from '../helpers/migrations';
 import Sqlite from 'better-sqlite3';
@@ -33,12 +34,13 @@ const deps = (over: Partial<ReleaseDeps> = {}): ReleaseDeps => ({
   },
   ...over,
 });
-function oldDatabase(folder: string) {
+function oldDatabase(folder: string, alerts = false) {
   const db = createDatabase(file);
   migrateDatabase(db, folder);
   db.insert(accounts)
     .values({ name: 'precious', baseCurrency: 'EUR', startingBalance: '1', createdAt: 't' })
     .run();
+  if (alerts) enableAlerts(db, new Date('2026-10-07T00:00:00Z'));
   db.$client.close();
 }
 const peek = <T>(f: (s: Sqlite.Database) => T): T => {
@@ -66,11 +68,12 @@ beforeEach(() => {
 afterEach(() => removeDir(root));
 
 describe('release step', () => {
-  it('a brand new disk: creates the database, no backup (nothing to protect), announces it', async () => {
+  it('a brand new disk: creates the database, no backup (nothing to protect), logs it', async () => {
     const r = await runRelease(deps());
     expect(r).toEqual({ ok: true, action: 'created', applied: 7 });
     expect(store.calls).toEqual([]);
-    expect(events()).toEqual(['migration_applied']);
+    expect(events()).toEqual([]); // alerts are OFF on a new install: nothing is queued
+    expect(lines.join('\n')).toContain('release.migrated');
   });
 
   it('up to date: does nothing, takes no backup', async () => {
@@ -81,14 +84,14 @@ describe('release step', () => {
   });
 
   it('pending migrations: a VERIFIED pre-migration backup comes first, then the migration', async () => {
-    const old = folderUpTo('0004_analyst');
+    const old = folderUpTo('0005_notifications');
     try {
-      oldDatabase(old);
+      oldDatabase(old, true);
       const r = await runRelease(deps());
       expect(r).toEqual({ ok: true, action: 'migrated', applied: 7 });
       // the backup was uploaded and read back before anything changed
       expect(store.calls.slice(0, 2)).toEqual(['put', 'get']);
-      expect([...store.objects.keys()][0]).toMatch(/-pre-migration-m5\.htbk$/);
+      expect([...store.objects.keys()][0]).toMatch(/-pre-migration-m6\.htbk$/);
       // the data survived, and the run is recorded even though backup_runs did not exist when it ran
       expect(
         peek((s) =>
@@ -108,7 +111,7 @@ describe('release step', () => {
   it('if the backup fails, nothing is migrated, the old database is untouched, and a notice is attempted', async () => {
     const old = folderUpTo('0005_notifications');
     try {
-      oldDatabase(old);
+      oldDatabase(old, true);
       store.denyAll = true;
       const before = peek((s) => migrationStatus(s));
       const r = await runRelease(deps());
@@ -133,6 +136,7 @@ describe('release step', () => {
       db.insert(accounts)
         .values({ name: 'precious', baseCurrency: 'EUR', startingBalance: '1', createdAt: 't' })
         .run();
+      enableAlerts(db, new Date('2026-10-07T00:00:00Z'));
       db.$client.close();
       const before = peek((s) => migrationStatus(s, broken));
       expect(before.pending).toBe(1);
