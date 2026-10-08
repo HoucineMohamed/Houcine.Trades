@@ -44,7 +44,10 @@ export function backupObjectKey(
   kind: BackupKind,
   migrations: number,
 ): string {
-  if (!Number.isInteger(migrations) || migrations < 0) throw new Error('invalid migration count');
+  // the name pattern reads at most four digits: a longer count would make a backup nobody can list
+  if (!Number.isInteger(migrations) || migrations < 0 || migrations > 9999) {
+    throw new Error('invalid migration count');
+  }
   return `${prefix}/${compactUtc(at)}-${kind}-m${migrations}.htbk`;
 }
 
@@ -99,13 +102,20 @@ export interface RetentionPlan {
   remove: string[];
 }
 
+/** Names dated later than this (plus a little clock difference) are not real backups of ours. */
+export const FUTURE_SKEW_MS = 5 * 60 * 1000;
+
 export function planRetention(
-  items: readonly BackupName[],
+  all: readonly BackupName[],
   now: Date,
   policy: typeof RETENTION = RETENTION,
 ): RetentionPlan {
-  if (items.length === 0) return { keep: [], remove: [] };
-  const keep = new Set<string>();
+  // A name dated in the FUTURE (a clock problem, or an object someone planted to push real backups out)
+  // takes no slot and counts for no invariant. It is never deleted either: it is left for a human.
+  const items = all.filter((i) => i.at.getTime() <= now.getTime() + FUTURE_SKEW_MS);
+  const future = all.filter((i) => i.at.getTime() > now.getTime() + FUTURE_SKEW_MS);
+  if (items.length === 0) return { keep: future.map((f) => f.key), remove: [] };
+  const keep = new Set<string>(future.map((f) => f.key));
   const sorted = [...items].sort(newestFirst);
 
   // invariants first: the newest overall, and the newest of every kind
@@ -117,8 +127,7 @@ export function planRetention(
   }
   for (const item of items) {
     if (item.kind === 'manual') keep.add(item.key); // a manual backup is never deleted by the schedule
-    // too new, or dated in the future (a clock problem): never deleted
-    if (now.getTime() - item.at.getTime() < RETENTION_GRACE_MS) keep.add(item.key);
+    if (now.getTime() - item.at.getTime() < RETENTION_GRACE_MS) keep.add(item.key); // too new
   }
 
   const scheduled = items.filter((i) => i.kind !== 'manual');
@@ -133,5 +142,8 @@ export function planRetention(
   }
 
   const remove = sorted.filter((i) => !keep.has(i.key)).map((i) => i.key);
-  return { keep: sorted.filter((i) => keep.has(i.key)).map((i) => i.key), remove };
+  return {
+    keep: [...future, ...sorted].filter((i) => keep.has(i.key)).map((i) => i.key),
+    remove,
+  };
 }

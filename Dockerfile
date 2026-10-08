@@ -19,9 +19,10 @@ WORKDIR /app
 # which better-sqlite3 needs to compile its native binary during `npm ci`. None of that reaches the
 # final image, which is built on the slim image.
 COPY package.json package-lock.json ./
-# Install scripts are ALLOWED on purpose (that is what builds better-sqlite3). The build then checks
-# that the native modules really load, and fails if they do not.
-RUN npm ci
+# Install scripts are NOT run for the whole dependency tree (a package's install script is code that runs
+# during the build). Only better-sqlite3 needs one (it compiles its native binary), so only that one is
+# run. The build then checks that the native modules really load, and fails if they do not.
+RUN npm ci --ignore-scripts && npm rebuild better-sqlite3
 COPY . .
 RUN npm run build
 RUN npm prune --omit=dev \
@@ -34,13 +35,16 @@ ENV NODE_ENV=production \
     HOSTED=true \
     PORT=10000
 WORKDIR /app
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/.next ./.next
-COPY --chown=node:node package.json tsconfig.json next.config.ts ./
-COPY --chown=node:node drizzle ./drizzle
-COPY --chown=node:node docs ./docs
-COPY --chown=node:node src ./src
-COPY --chown=node:node scripts ./scripts
+# The code is owned by root and read-only for the app user: a flaw in the web server cannot rewrite the
+# files the supervisor starts again after a restart. Only the data folder (and Next's cache) is writable.
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/.next ./.next
+COPY package.json tsconfig.json next.config.ts ./
+COPY drizzle ./drizzle
+COPY docs ./docs
+COPY src ./src
+COPY scripts ./scripts
+RUN mkdir -p .next/cache && chown node:node .next/cache
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 EXPOSE 10000
 # "ok" or "not ok", nothing else (the same route the platform checks)
@@ -48,4 +52,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||10000)+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["node", "node_modules/tsx/dist/cli.mjs", "--conditions=react-server", "scripts/host/start.ts"]
+CMD ["node", "--conditions=react-server", "--import", "tsx", "scripts/host/start.ts"]

@@ -154,3 +154,113 @@ describe('retention policy', () => {
     expect(RETENTION).toEqual({ daily: 7, weekly: 4, monthly: 6, preMigration: 5 });
   });
 });
+
+describe('names dated in the future cannot push real backups out', () => {
+  it('a planted future-dated object takes no slot, counts for no invariant, and is never deleted', () => {
+    const NOW2 = at('2026-10-08T12:00:00Z');
+    const real = [
+      mk('2026-10-07T10:00:00Z'),
+      mk('2026-10-05T10:00:00Z'),
+      mk('2026-09-01T10:00:00Z'),
+      mk('2026-03-01T10:00:00Z'),
+    ];
+    const planted = [
+      mk('2099-01-01T00:00:00Z'),
+      mk('2099-01-02T00:00:00Z', 'pre-migration'),
+      mk('2099-02-01T00:00:00Z'),
+      mk('2099-03-01T00:00:00Z'),
+      mk('2099-04-01T00:00:00Z'),
+      mk('2099-05-01T00:00:00Z'),
+      mk('2099-06-01T00:00:00Z'),
+      mk('2099-07-01T00:00:00Z'),
+    ];
+    const plan = planRetention([...real, ...planted], NOW2);
+    for (const p of planted) expect(plan.keep, p.key).toContain(p.key); // left for a human
+    expect(plan.remove).not.toEqual(expect.arrayContaining(planted.map((p) => p.key)));
+    // the real newest backup survives, as it would without the planted names
+    expect(plan.keep).toContain(real[0]?.key);
+    expect(plan.remove).toEqual(planRetention(real, NOW2).remove);
+  });
+  it('only future-dated names: nothing is deleted', () => {
+    const plan = planRetention([mk('2099-01-01T00:00:00Z')], at('2026-10-08T12:00:00Z'));
+    expect(plan.remove).toEqual([]);
+  });
+  it('a few minutes of clock difference do not make a real backup "future"', () => {
+    const now = at('2026-10-08T12:00:00Z');
+    const slightly = mk('2026-10-08T12:03:00Z');
+    expect(planRetention([slightly, mk('2020-01-01T00:00:00Z')], now).keep).toContain(slightly.key);
+  });
+});
+
+describe('names can always be read back', () => {
+  it('every kind and every writable migration count parses; a count that could not be read is refused at writing', () => {
+    for (const kind of ['daily', 'pre-migration', 'manual'] as BackupKind[]) {
+      for (const m of [0, 9, 10, 9999]) {
+        expect(
+          parseBackupKey(backupObjectKey(P, at('2026-10-08T03:15:00Z'), kind, m), P),
+          `${kind} ${m}`,
+        ).not.toBeNull();
+      }
+    }
+    expect(() => backupObjectKey(P, at('2026-10-08T03:15:00Z'), 'daily', 10000)).toThrow();
+  });
+  it('leap day: valid in 2024, impossible in 2025; a similar prefix is not ours', () => {
+    expect(parseBackupKey('backups/20240229T000000Z-daily-m1.htbk', P)).not.toBeNull();
+    for (const bad of [
+      '20250229T000000Z',
+      '20261231T240000Z',
+      '20261231T235960Z',
+      '20260100T000000Z',
+    ]) {
+      expect(parseBackupKey(`backups/${bad}-daily-m1.htbk`, P), bad).toBeNull();
+    }
+    expect(parseBackupKey('backups2/20240229T000000Z-daily-m1.htbk', P)).toBeNull();
+    expect(parseBackupKey('backups/sub/20240229T000000Z-daily-m1.htbk', P)).toBeNull();
+  });
+  it('ISO weeks: Sunday and the following Monday are different weeks, across New Year', () => {
+    const now = at('2026-03-01T12:00:00Z');
+    const policy = {
+      daily: 0,
+      weekly: 4,
+      monthly: 0,
+      preMigration: 0,
+    } as unknown as typeof RETENTION;
+    const sun = mk('2026-01-04T10:00:00Z');
+    const sunEarly = mk('2026-01-04T01:00:00Z');
+    const thu = mk('2026-01-01T10:00:00Z');
+    const mon = mk('2026-01-05T00:00:00Z');
+    const newest = mk('2026-02-27T10:00:00Z');
+    const plan = planRetention([sun, sunEarly, thu, mon, newest], now, policy);
+    expect(plan.keep).toContain(sun.key);
+    expect(plan.keep).toContain(mon.key);
+    expect(plan.remove).toContain(sunEarly.key);
+    expect(plan.remove).toContain(thu.key);
+  });
+  it('property: idempotent, order independent, manual and under-24h never removed', () => {
+    let seed = 99;
+    const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+    const kinds: BackupKind[] = ['daily', 'pre-migration', 'manual'];
+    for (let round = 0; round < 200; round++) {
+      const items: BackupName[] = [];
+      const seen = new Set<string>();
+      for (let i = 0; i < 1 + Math.floor(rnd() * 50); i++) {
+        const t = new Date(NOW_FIXED.getTime() - Math.floor(rnd() * 500 * 86_400_000));
+        const it = mk(t.toISOString().replace(/\.\d+Z$/, 'Z'), kinds[Math.floor(rnd() * 3)]);
+        if (!seen.has(it.key)) {
+          seen.add(it.key);
+          items.push(it);
+        }
+      }
+      const plan = planRetention(items, NOW_FIXED);
+      expect(planRetention([...items].reverse(), NOW_FIXED)).toEqual(plan);
+      const kept = items.filter((i) => plan.keep.includes(i.key));
+      expect(planRetention(kept, NOW_FIXED).remove).toEqual([]);
+      for (const i of items) {
+        if (i.kind === 'manual' || NOW_FIXED.getTime() - i.at.getTime() < 24 * 3_600_000) {
+          expect(plan.remove).not.toContain(i.key);
+        }
+      }
+    }
+  });
+});
+const NOW_FIXED = new Date('2026-10-08T12:00:00Z');

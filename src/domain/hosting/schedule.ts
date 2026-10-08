@@ -20,8 +20,12 @@ export function backupDue(i: ScheduleInput): boolean {
   const ok = parse(i.lastSuccessAt);
   const attempt = parse(i.lastAttemptAt);
   // A time that cannot be read must not stop backups forever: treat it as "never happened".
-  const okMs = ok !== null && Number.isFinite(ok) ? ok : null;
-  const attemptMs = attempt !== null && Number.isFinite(attempt) ? attempt : null;
+  // A time in the FUTURE (a clock moved back, a corrupt row) would block backups until the clock catches
+  // up, so it counts as "never happened" too.
+  const usable = (v: number | null): number | null =>
+    v !== null && Number.isFinite(v) && v <= now ? v : null;
+  const okMs = usable(ok);
+  const attemptMs = usable(attempt);
   if (okMs !== null && now - okMs < BACKUP_EVERY_MS) return false;
   if (attemptMs !== null && now - attemptMs < BACKUP_RETRY_MS) return false;
   return true;

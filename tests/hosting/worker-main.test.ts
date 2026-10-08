@@ -129,3 +129,42 @@ describe('hosted worker', () => {
     expect(fs.existsSync(heartbeatPath(dir))).toBe(true);
   });
 });
+
+describe('shutdown waits for a backup that outlasts a cycle', () => {
+  it('a later cycle that finds the backup running does not replace it with an instantly finished one', async () => {
+    const db = memoryDb();
+    const controller = new AbortController();
+    let finished = false;
+    let started = 0;
+    let cycles = 0;
+    const job = {
+      tick: () => {
+        started += 1;
+        return new Promise<'ran'>((resolve) =>
+          setTimeout(() => {
+            finished = true;
+            resolve('ran');
+          }, 120),
+        );
+      },
+    };
+    const run = runHostedWorker({
+      db,
+      channel: null,
+      signal: controller.signal,
+      dataDir: dir,
+      backupJob: job,
+      log,
+      intervalMs: 10,
+      backupWaitMs: 3000,
+    });
+    // several cycles pass while the one slow backup is still running, then we are told to stop
+    await new Promise((r) => setTimeout(r, 60));
+    cycles = 1;
+    controller.abort();
+    await run;
+    expect(cycles).toBe(1);
+    expect(started).toBe(1); // never a second backup while one runs
+    expect(finished).toBe(true); // and the stop waited for it before closing the database
+  });
+});

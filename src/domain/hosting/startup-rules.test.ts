@@ -77,3 +77,17 @@ describe('start-up rules', () => {
     for (const m of Object.values(STARTUP_MESSAGES)) expect(m).not.toMatch(/[A-Za-z0-9_-]{32,}/);
   });
 });
+
+describe('fail closed on odd numbers', () => {
+  it.each([Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY])(
+    'migrationsPending %s is never a pass',
+    (n) => {
+      const r = evaluateStartup({ ...GOOD, migrationsPending: n });
+      expect(r.ok).toBe(false);
+      expect(r.failures.map((f) => f.code).some((c) => c.startsWith('migrations_'))).toBe(true);
+    },
+  );
+  it('not hosted never enters setup mode', () => {
+    expect(evaluateStartup({ ...GOOD, hosted: false, ownerExists: false }).setupMode).toBe(false);
+  });
+});

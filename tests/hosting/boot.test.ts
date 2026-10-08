@@ -70,7 +70,10 @@ function deps(over: Partial<BootDeps> = {}): BootDeps {
     clock: () => new Date('2026-10-08T03:00:00Z'),
     sleep: async (ms) => {
       sleeps.push(ms);
+      // a loop that never ends must FAIL the test quickly, not hang it
+      if (sleeps.length > 300) throw new Error('runaway wait loop');
       onSleep?.(ms);
+      await new Promise((resolve) => setTimeout(resolve, 0)); // let timeouts and other work run
     },
     startSetupServer: async () => {
       setupStarted += 1;
@@ -328,7 +331,7 @@ describe('boot: no owner yet means setup mode', () => {
     const code = await runBoot(deps());
     expect(code).toBe(0);
     expect(fs.existsSync(dbFile)).toBe(true);
-    expect(store.calls).toEqual([]); // nothing to protect yet
+    expect(store.calls).toEqual(['list']); // only a look at what backups exist; nothing to protect yet, no upload
     expect(setupStarted).toBe(1);
   });
 });
@@ -419,5 +422,183 @@ describe('setup server', () => {
     expect(await get('/healthz', 'POST')).toEqual({ status: 503, body: 'setup not finished' });
     expect(await get('/healthz?x=1')).toEqual({ status: 503, body: 'setup not finished' });
     await server.close();
+  });
+});
+
+describe('boot: hardening found by the reviews', () => {
+  it('not hosted: refuses after a pause (no tight restart loop)', async () => {
+    env.HOSTED = 'false';
+    await runBoot(deps());
+    expect(sleeps).toContain(REFUSE_PAUSE_MS);
+  });
+
+  it('a plaintext snapshot left by a hard kill is swept at the start, and said', async () => {
+    readyDb();
+    const tmp = path.join(dataDir, 'tmp');
+    fs.mkdirSync(tmp, { recursive: true });
+    const leftover = path.join(tmp, 'snapshot-123e4567-e89b-12d3-a456-426614174000.db');
+    fs.writeFileSync(leftover, 'plain copy of the journal');
+    const run = runBoot(deps());
+    await new Promise((r) => setTimeout(r, 60));
+    expect(fs.existsSync(leftover)).toBe(false);
+    expect(logs.join('\n')).toContain('boot.swept_snapshots');
+    stopAll();
+    await run;
+  });
+
+  it('a staged restore that cannot be applied is remembered on the disk, the database in use is untouched, and the app still starts', async () => {
+    readyDb();
+    const live = createDatabase(dbFile);
+    live
+      .insert(accounts)
+      .values({ name: 'current', baseCurrency: 'EUR', startingBalance: '1', createdAt: 't' })
+      .run();
+    live.$client.close();
+    const src2 = createDatabase(path.join(root, 'src2.db'));
+    migrateDatabase(src2);
+    const made = await runBackup(
+      {
+        db: src2,
+        store,
+        key,
+        prefix: 'backups',
+        tmpDir: path.join(root, 'tmp2'),
+        clock: () => new Date('2026-10-01T03:00:00Z'),
+      },
+      'daily',
+    );
+    src2.$client.close();
+    await stageRestore(
+      { store, key, prefix: 'backups', dataDir },
+      (made as { objectKey: string }).objectKey,
+    );
+    fs.appendFileSync(path.join(dataDir, 'restore', 'incoming.db'), 'tampered');
+    const run = runBoot(deps());
+    await new Promise((r) => setTimeout(r, 100));
+    const { readRestoreFailure } = await import('@/hosting/restore');
+    expect(readRestoreFailure(dataDir)?.reason).toBe('changed');
+    expect(logs.join('\n')).toContain('boot.restore_not_applied');
+    const db = createDatabase(dbFile);
+    expect(
+      (db.$client.prepare('SELECT name FROM accounts').all() as { name: string }[]).map(
+        (r) => r.name,
+      ),
+    ).toEqual(['current']);
+    db.$client.close();
+    expect(spawned.map((s) => s.spec.name)).toEqual(['web', 'worker']);
+    stopAll();
+    await run;
+  });
+
+  it('after an applied restore every session is ended and every account is halted until the owner looks', async () => {
+    const src3 = createDatabase(path.join(root, 'src3.db'));
+    migrateDatabase(src3);
+    src3
+      .insert(accounts)
+      .values({ name: 'from-backup', baseCurrency: 'EUR', startingBalance: '1000', createdAt: 't' })
+      .run();
+    src3.$client
+      .prepare(
+        "INSERT INTO sessions (id, token_hash, created_at, last_seen_at) VALUES (1, 'h', 't', 't')",
+      )
+      .run();
+    owner(path.join(root, 'src3.db'));
+    const made = await runBackup(
+      {
+        db: src3,
+        store,
+        key,
+        prefix: 'backups',
+        tmpDir: path.join(root, 'tmp3'),
+        clock: () => new Date('2026-10-07T03:00:00Z'),
+      },
+      'daily',
+    );
+    src3.$client.close();
+    readyDb();
+    await stageRestore(
+      { store, key, prefix: 'backups', dataDir },
+      (made as { objectKey: string }).objectKey,
+    );
+    const run = runBoot(deps());
+    await new Promise((r) => setTimeout(r, 150));
+    const db = createDatabase(dbFile);
+    expect(
+      (
+        db.$client.prepare('SELECT revoked_at AS at FROM sessions').all() as { at: string | null }[]
+      ).every((s) => s.at !== null),
+    ).toBe(true);
+    const { loadRiskContext } = await import('@/data/risk');
+    expect(loadRiskContext(db, 1, new Date()).halts.map((h) => h.kind)).toContain('manual');
+    db.$client.close();
+    stopAll();
+    await run;
+  });
+
+  it('no database but backups exist: said loudly (and setup mode still starts so the shell can restore)', async () => {
+    const src4 = createDatabase(path.join(root, 'src4.db'));
+    migrateDatabase(src4);
+    await runBackup(
+      {
+        db: src4,
+        store,
+        key,
+        prefix: 'backups',
+        tmpDir: path.join(root, 'tmp4'),
+        clock: () => new Date('2026-10-07T03:00:00Z'),
+      },
+      'daily',
+    );
+    src4.$client.close();
+    onSleep = () => stopFns.forEach((s) => s());
+    await runBoot(deps());
+    expect(logs.join('\n')).toContain('boot.database_missing_backups_exist');
+    expect(setupStarted).toBe(1);
+  });
+
+  it('no database and no backups is a normal new install: no warning', async () => {
+    onSleep = () => stopFns.forEach((s) => s());
+    await runBoot(deps());
+    expect(logs.join('\n')).not.toContain('database_missing_backups_exist');
+  });
+
+  it('if the health check server cannot start, it refuses with a pause instead of crashing', async () => {
+    readyDb(false);
+    const code = await runBoot(
+      deps({
+        startSetupServer: async () => {
+          throw new Error('EADDRINUSE');
+        },
+      }),
+    );
+    expect(code).toBe(EXIT_REFUSED);
+    expect(sleeps).toContain(REFUSE_PAUSE_MS);
+    expect(logs.join('\n')).toContain('boot.setup_server_failed');
+  });
+
+  it('a stop request cuts a pause short', async () => {
+    readyDb(false);
+    // the owner poll sleeps 10 s: a stop during it must not wait
+    let release: () => void = () => undefined;
+    const slow = new Promise<void>((resolve) => (release = resolve));
+    const run = runBoot(deps({ sleep: () => slow }));
+    await new Promise((r) => setTimeout(r, 60));
+    for (const s of stopFns) s();
+    expect(await run).toBe(0);
+    release();
+  });
+});
+
+describe('start script: the web server gets no backup key or storage credentials', () => {
+  it('uses webEnvironment for the web child only', () => {
+    const text = fs.readFileSync(
+      path.join(import.meta.dirname, '..', '..', 'scripts', 'host', 'start.ts'),
+      'utf8',
+    );
+    expect(text).toContain('webEnvironment(');
+    const web = text.slice(text.indexOf("name: 'web'"), text.indexOf("name: 'worker'"));
+    expect(web).toContain('webEnvironment');
+    const worker = text.slice(text.indexOf("name: 'worker'"), text.indexOf('supervisor:'));
+    expect(worker).not.toContain('webEnvironment');
   });
 });

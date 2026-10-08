@@ -79,3 +79,28 @@ describe('words', () => {
     expect(all).not.toMatch(/\b(good|bad|should|must|great|terrible)\b/i);
   });
 });
+
+describe('clock problems and exact boundaries', () => {
+  const future = '2030-01-01T00:00:00.000Z';
+  it('a success dated in the future is "unknown", never a healthy backup', () => {
+    expect(backupState({ ...base, lastSuccessAt: future })).toBe('unknown');
+    expect(backupIsProblem(backupState({ ...base, lastSuccessAt: future }))).toBe(true);
+  });
+  it('a few minutes of clock difference are tolerated', () => {
+    expect(
+      backupState({ ...base, lastSuccessAt: new Date(NOW.getTime() + 60_000).toISOString() }),
+    ).toBe('ok');
+  });
+  it('the tracking window is exactly 36 hours', () => {
+    const t = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
+    expect(backupState({ ...base, trackingSince: t(BACKUP_STALE_MS) })).toBe('pending');
+    expect(backupState({ ...base, trackingSince: t(BACKUP_STALE_MS + 1) })).toBe('never');
+    expect(needsStaleNotice({ ...base, trackingSince: t(BACKUP_STALE_MS) })).toBe(false);
+    expect(needsStaleNotice({ ...base, trackingSince: t(BACKUP_STALE_MS + 1) })).toBe(true);
+  });
+  it('a stale success with a later failure is stale', () => {
+    expect(backupState({ ...base, lastSuccessAt: ago(40 * H), lastFailureAt: ago(H) })).toBe(
+      'stale',
+    );
+  });
+});

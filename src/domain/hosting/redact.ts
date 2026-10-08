@@ -71,7 +71,8 @@ export function redactValue(value: unknown, secrets: readonly string[] = [], dep
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>).slice(0, MAX_KEYS)) {
-      out[k] = SENSITIVE_KEY.test(k) ? REDACTED : redactValue(v, secrets, depth + 1);
+      const safeKey = redactText(k, secrets); // a secret used as a key must not survive either
+      out[safeKey] = SENSITIVE_KEY.test(k) ? REDACTED : redactValue(v, secrets, depth + 1);
     }
     return out;
   }

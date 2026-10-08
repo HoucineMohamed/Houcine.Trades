@@ -186,7 +186,11 @@ describe('restore: bad backups are refused and nothing is staged', () => {
     const k = 'backups/20261008T030000Z-daily-m7.htbk';
     store.objects.set(
       k,
-      encryptBackup(gzipSync(Buffer.from('just some text, not sqlite at all')), key),
+      encryptBackup(
+        gzipSync(Buffer.from('just some text, not sqlite at all')),
+        key,
+        '20261008T030000Z-daily-m7.htbk',
+      ),
     );
     expect(await stageRestore(rd(), k)).toEqual({ ok: false, code: 'not_a_database' });
     nothingLeft();
@@ -351,5 +355,67 @@ describe('restore logs', () => {
     await stageRestore(rd({ log }), objectKey);
     expect(lines.join('\n')).not.toContain(objectKey);
     expect(lines.join('\n')).toContain('restore.staged');
+  });
+});
+
+describe('hardening found by the reviews', () => {
+  it('an object swapped for another valid backup is refused (the name is authenticated)', async () => {
+    const objectKey = await backupOf(src);
+    const blob = store.objects.get(objectKey) as Buffer;
+    const other = 'backups/20270101T000000Z-daily-m7.htbk'; // looks newer, holds the older content
+    store.objects.set(other, Buffer.from(blob));
+    expect(await stageRestore(rd(), other)).toEqual({ ok: false, code: 'wrong_key_or_damaged' });
+    expect(restoreIsStaged(dataDir)).toBe(false);
+  });
+
+  it('the kept old database keeps its side files paired with it (name-wal, name-shm)', async () => {
+    const objectKey = await backupOf(src);
+    const live = liveWith('current');
+    live.$client.pragma('wal_checkpoint(TRUNCATE)');
+    live.$client.close();
+    fs.writeFileSync(`${liveFile}-wal`, '');
+    fs.writeFileSync(`${liveFile}-shm`, '');
+    await stageRestore(rd(), objectKey);
+    const applied = await applyStagedRestore({ dataDir, databaseFile: liveFile, clock: () => NOW });
+    const kept = (applied as { keptAs: string }).keptAs;
+    expect(fs.existsSync(`${kept}-wal`)).toBe(true);
+    expect(fs.existsSync(`${kept}-shm`)).toBe(true);
+    const old = createDatabase(kept);
+    expect(names(old)).toEqual(['current']);
+    old.$client.close();
+  });
+
+  it('the staged marker is written in one step (no temporary file is left)', async () => {
+    const objectKey = await backupOf(src);
+    await stageRestore(rd(), objectKey);
+    expect(fs.readdirSync(path.join(dataDir, 'restore')).sort()).toEqual([
+      'READY.json',
+      'incoming.db',
+    ]);
+  });
+
+  it('an unreadable marker is cleaned up, so it does not fail at every start', async () => {
+    const objectKey = await backupOf(src);
+    await stageRestore(rd(), objectKey);
+    fs.writeFileSync(path.join(dataDir, 'restore', 'READY.json'), '{ not json');
+    expect(await applyStagedRestore({ dataDir, databaseFile: liveFile })).toEqual({
+      applied: false,
+      reason: 'invalid',
+    });
+    expect(restoreIsStaged(dataDir)).toBe(false);
+  });
+
+  it('a failed apply is remembered on the disk and cancel clears it', async () => {
+    const { recordRestoreResult, readRestoreFailure } = await import('@/hosting/restore');
+    expect(readRestoreFailure(dataDir)).toBeNull();
+    recordRestoreResult(dataDir, { applied: false, reason: 'changed' }, NOW);
+    expect(readRestoreFailure(dataDir)).toEqual({ at: NOW.toISOString(), reason: 'changed' });
+    recordRestoreResult(dataDir, { applied: true, reason: 'applied' }, NOW);
+    expect(readRestoreFailure(dataDir)).toBeNull();
+    recordRestoreResult(dataDir, { applied: false, reason: 'expired' }, NOW);
+    expect(cancelStagedRestore(dataDir)).toBe(true);
+    expect(readRestoreFailure(dataDir)).toBeNull();
+    fs.writeFileSync(path.join(dataDir, 'restore', 'LAST_RESULT.json'), 'garbage');
+    expect(readRestoreFailure(dataDir)).toBeNull(); // unreadable is never a crash
   });
 });

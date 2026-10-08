@@ -25,7 +25,9 @@ export async function runHostedWorker(input: {
   backupWaitMs?: number;
 }): Promise<void> {
   touchHeartbeat(input.dataDir); // alive from the very start, before the first cycle ends
-  let backupRun: Promise<unknown> = Promise.resolve();
+  // One backup at a time, and the SAME promise until it ends: shutting down waits for it, a later cycle
+  // that finds one running never replaces it with an instantly finished one.
+  let inFlight: Promise<unknown> | null = null;
   input.log.info('worker.started', { backups: input.backupJob !== null });
   await runWorker({
     db: input.db,
@@ -34,11 +36,14 @@ export async function runHostedWorker(input: {
     intervalMs: input.intervalMs,
     onCycle: (r: CycleReport) => {
       touchHeartbeat(input.dataDir);
-      if (input.backupJob) {
+      if (input.backupJob && inFlight === null) {
         // handled right here: an unhandled rejection would end the whole worker process
-        backupRun = Promise.resolve()
+        inFlight = Promise.resolve()
           .then(() => input.backupJob?.tick())
-          .catch(() => input.log.error('worker.backup_tick_failed', {}));
+          .catch(() => input.log.error('worker.backup_tick_failed', {}))
+          .finally(() => {
+            inFlight = null;
+          });
       }
       if (r.collect?.recorded || r.deliver?.sent || r.deliver?.failed || r.errors.length > 0) {
         input.log.info('worker.cycle', {
@@ -52,7 +57,7 @@ export async function runHostedWorker(input: {
   });
   input.log.info('worker.stopping', {});
   await Promise.race([
-    backupRun.catch(() => undefined),
+    (inFlight ?? Promise.resolve()).catch(() => undefined),
     new Promise((resolve) => setTimeout(resolve, input.backupWaitMs ?? 15_000).unref()),
   ]);
   try {

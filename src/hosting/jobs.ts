@@ -13,6 +13,9 @@ import type { ObjectStore } from './object-store';
  * Due means: no verified backup in the last 24 hours and no attempt in the last 30 minutes. A
  * successful backup is followed by the retention clean-up. If there is no verified backup for
  * 36 hours, one warning per day is recorded (and shown in the header). Never throws.
+ *
+ * The job also remembers its own last attempt in memory: if the database row of an attempt cannot be
+ * written, the 30-minute spacing still holds (otherwise a full backup would start every cycle).
  */
 
 export interface BackupJobDeps {
@@ -31,25 +34,39 @@ export type TickResult = 'ran' | 'skipped' | 'busy' | 'error';
 export function createBackupJob(deps: BackupJobDeps): { tick(): Promise<TickResult> } {
   const clock = deps.clock ?? (() => new Date());
   let running = false;
+  let lastAttemptInMemory: string | null = null;
   return {
     async tick() {
-      if (running) return 'busy';
-      running = true;
+      const now = clock();
+      let status;
       try {
-        const now = clock();
-        const status = readBackupStatus(deps.db);
+        status = readBackupStatus(deps.db);
+        // checked first: a long-running backup must not hide the "no backup for a day and a half" notice
         if (needsStaleNotice({ ...status, now })) {
-          announce(deps.db, 'backup_stale', `backup_stale:${now.toISOString().slice(0, 10)}`, now);
-        }
-        if (
-          !backupDue({
-            lastSuccessAt: status.lastSuccessAt,
-            lastAttemptAt: status.lastAttemptAt,
+          announce(
+            deps.db,
+            'backup_stale',
+            `backup_stale:${now.toISOString().slice(0, 10)}`,
             now,
-          })
-        ) {
-          return 'skipped';
+            deps.log,
+          );
         }
+      } catch (e) {
+        deps.log.error('backup.job_status_unreadable', {
+          error: e instanceof Error ? e.name : 'unknown',
+        });
+        return 'error';
+      }
+      if (running) return 'busy';
+      const lastAttemptAt =
+        [status.lastAttemptAt, lastAttemptInMemory]
+          .filter((v): v is string => v !== null)
+          .sort()
+          .at(-1) ?? null;
+      if (!backupDue({ lastSuccessAt: status.lastSuccessAt, lastAttemptAt, now })) return 'skipped';
+      running = true;
+      lastAttemptInMemory = now.toISOString();
+      try {
         const result = await runBackup(
           {
             db: deps.db,
@@ -65,8 +82,8 @@ export function createBackupJob(deps: BackupJobDeps): { tick(): Promise<TickResu
         );
         if (result.ok) await applyRetention(deps.store, deps.prefix, clock(), deps.log);
         return 'ran';
-      } catch {
-        deps.log.error('backup.job_error', {});
+      } catch (e) {
+        deps.log.error('backup.job_error', { error: e instanceof Error ? e.name : 'unknown' });
         return 'error';
       } finally {
         running = false;

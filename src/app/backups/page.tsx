@@ -3,10 +3,12 @@ import { listBackupRuns, readBackupStatus } from '@/data/backups';
 import {
   BACKUP_ERROR_WORDS,
   BACKUP_STATE_WORDS,
+  RESTORE_FAILURE_WORDS,
   backupIsProblem,
   backupState,
 } from '@/domain/hosting/backup-health';
 import { RETENTION } from '@/domain/hosting/retention';
+import { readRestoreFailure } from '@/hosting/restore';
 import { formatLocal } from '../_lib/form';
 import { guardedPage } from '../_lib/guard';
 
@@ -19,6 +21,8 @@ export default guardedPage(async (ctx) => {
   const status = readBackupStatus(ctx.db);
   const runs = listBackupRuns(ctx.db, 30);
   const state = backupState({ ...status, now: ctx.now });
+  const dataDir = process.env.DATA_DIR;
+  const restoreFailure = hosted && dataDir ? readRestoreFailure(dataDir) : null;
   return (
     <main>
       <div className="page-head">
@@ -41,6 +45,14 @@ export default guardedPage(async (ctx) => {
             <p role={backupIsProblem(state) ? 'alert' : 'status'}>
               <strong>{BACKUP_STATE_WORDS[state]}</strong>
             </p>
+            {restoreFailure && (
+              <p role="alert" className="notice notice-alert">
+                A staged restore was NOT applied at the last start (
+                {RESTORE_FAILURE_WORDS[restoreFailure.reason] ?? 'unknown reason'}). The database in
+                use is unchanged. Run <code>npm run host:restore -- --cancel</code> in the shell to
+                clear this notice.
+              </p>
+            )}
             <ul>
               <li>
                 Last verified backup:{' '}

@@ -12,7 +12,7 @@ import {
   planRetention,
 } from '@/domain/hosting/retention';
 import { announce } from './announce';
-import { BackupCryptoError, decryptBackup, encryptBackup } from './crypto';
+import { backupContext, BackupCryptoError, decryptBackup, encryptBackup } from './crypto';
 import { inspectDatabaseFile } from './migrations';
 import { StoreError, type ObjectStore } from './object-store';
 import type { Logger } from './logger';
@@ -70,15 +70,42 @@ function storeCode(e: unknown): BackupErrorCode {
   return 'upload_failed';
 }
 
+/** Largest database a backup may expand to (a guard against a hostile or damaged object). */
+export const MAX_DATABASE_BYTES = 2 * 1024 * 1024 * 1024;
+
+/**
+ * A plaintext snapshot only lives while a backup runs. A hard kill (out of memory, the platform, the
+ * supervisor's last resort) can leave one behind, so every start removes them. Call it only when no
+ * backup can be running (at boot, before the worker starts).
+ */
+export function sweepStaleSnapshots(tmpDir: string): number {
+  let removed = 0;
+  try {
+    for (const name of fs.readdirSync(tmpDir)) {
+      if (!/^snapshot-[0-9a-f-]{36}\.db(-wal|-shm|-journal)?$/.test(name)) continue;
+      fs.rmSync(path.join(tmpDir, name), { force: true });
+      removed += 1;
+    }
+  } catch {
+    /* no such folder: nothing to sweep */
+  }
+  return removed;
+}
+
 export async function runBackup(deps: BackupDeps, kind: BackupKind): Promise<BackupResult> {
   const clock = deps.clock ?? (() => new Date());
   const startedAt = clock();
-  fs.mkdirSync(deps.tmpDir, { recursive: true, mode: 0o700 });
   const snapshot = path.join(deps.tmpDir, `snapshot-${randomUUID()}.db`);
+  let uploadedKey: string | null = null;
   let outcome:
     | { ok: true; objectKey: string; sizeBytes: number; sha256: string }
     | { ok: false; code: BackupErrorCode };
   try {
+    try {
+      fs.mkdirSync(deps.tmpDir, { recursive: true, mode: 0o700 });
+    } catch {
+      throw new Step('snapshot_failed');
+    }
     // 1 + 2: a consistent snapshot, checked
     try {
       await deps.db.$client.backup(snapshot);
@@ -94,20 +121,22 @@ export async function runBackup(deps: BackupDeps, kind: BackupKind): Promise<Bac
     } catch (e) {
       throw e instanceof Step ? e : new Step('snapshot_failed');
     }
-    // 3: compress, then encrypt
+    // 3: the name is fixed BEFORE encrypting, because the name is part of what is authenticated
+    const objectKey = backupObjectKey(deps.prefix, startedAt, kind, migrations);
+    const context = backupContext(objectKey);
     let plainHash: string;
     let blob: Buffer;
     try {
       const raw = fs.readFileSync(snapshot);
       plainHash = sha256(raw);
-      blob = encryptBackup(gzipSync(raw, { level: 6 }), deps.key);
+      blob = encryptBackup(gzipSync(raw, { level: 6 }), deps.key, context);
     } catch {
       throw new Step('encrypt_failed');
     }
-    const objectKey = backupObjectKey(deps.prefix, startedAt, kind, migrations);
     const blobHash = sha256(blob);
     // 4: upload
     try {
+      uploadedKey = objectKey;
       await deps.store.put(objectKey, blob);
     } catch (e) {
       throw new Step(storeCode(e));
@@ -116,16 +145,17 @@ export async function runBackup(deps: BackupDeps, kind: BackupKind): Promise<Bac
     try {
       const back = await deps.store.get(objectKey);
       if (back.length !== blob.length || sha256(back) !== blobHash) throw new Step('verify_failed');
-      const again = sha256(gunzipSync(decryptBackup(back, deps.key)));
+      const again = sha256(
+        gunzipSync(decryptBackup(back, deps.key, context), { maxOutputLength: MAX_DATABASE_BYTES }),
+      );
       if (again !== plainHash) throw new Step('verify_failed');
     } catch (e) {
       if (e instanceof StoreError && e.code !== 'not_found') {
         throw new Step(storeCode(e) === 'upload_failed' ? 'verify_failed' : storeCode(e));
       }
-      // best effort: do not leave an unverified object behind that could be mistaken for a good one
-      await deps.store.delete(objectKey).catch(() => undefined);
       throw e instanceof Step ? e : new Step('verify_failed');
     }
+    uploadedKey = null; // verified: it stays
     outcome = { ok: true, objectKey, sizeBytes: blob.length, sha256: blobHash };
   } catch (e) {
     outcome = {
@@ -139,8 +169,16 @@ export async function runBackup(deps: BackupDeps, kind: BackupKind): Promise<Bac
     };
   } finally {
     // the plaintext snapshot and its side files never outlive the backup
-    for (const f of ['', '-wal', '-shm', '-journal']) fs.rmSync(snapshot + f, { force: true });
+    for (const f of ['', '-wal', '-shm', '-journal']) {
+      try {
+        fs.rmSync(snapshot + f, { force: true });
+      } catch {
+        /* the folder may not even exist: cleaning up must never turn a failure into a crash */
+      }
+    }
   }
+  // an object that was uploaded but not verified must not be mistaken for a good backup later
+  if (uploadedKey !== null) await deps.store.delete(uploadedKey).catch(() => undefined);
 
   const finishedAt = clock();
   let runId: number | null = null;
@@ -159,8 +197,8 @@ export async function runBackup(deps: BackupDeps, kind: BackupKind): Promise<Bac
           }
         : { kind, outcome: 'failed', startedAt, finishedAt, errorCode: outcome.code },
     );
-  } catch {
-    deps.log?.error('backup.record_failed', {});
+  } catch (e) {
+    deps.log?.error('backup.record_failed', { error: e instanceof Error ? e.name : 'unknown' });
   }
   const stamp = runId ?? finishedAt.getTime();
   announce(
@@ -168,9 +206,14 @@ export async function runBackup(deps: BackupDeps, kind: BackupKind): Promise<Bac
     outcome.ok ? 'backup_succeeded' : 'backup_failed',
     `backup:${outcome.ok ? 'ok' : 'failed'}:${stamp}`,
     finishedAt,
+    deps.log,
   );
   if (outcome.ok) {
-    deps.log?.info('backup.ok', { kind, bytes: outcome.sizeBytes, sha256: outcome.sha256 });
+    deps.log?.info('backup.ok', {
+      kind,
+      bytes: outcome.sizeBytes,
+      checksum: outcome.sha256.slice(0, 12),
+    });
     return {
       ok: true,
       objectKey: outcome.objectKey,

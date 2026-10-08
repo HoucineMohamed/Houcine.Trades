@@ -179,6 +179,14 @@ pending after the release step. Migrations run ONLY in the release step, after a
   and `auth:reset` in the platform's shell. If the shell is root, the scripts step down to the app user first.
 - **`/healthz`** is the only public route besides `/login`. It answers `ok` or `not ok` and nothing else
   (no version, no detail), and is on the allowlist in the guard discovery test.
+- **After a restore** (a copy of the past is back) every session is ended and every account gets a
+  precautionary halt, so a session ended after the backup, or a halt begun after it, cannot silently
+  come back; resetting a halt needs a fresh code. A restore that cannot be applied leaves the database
+  as it was and is shown on the Backups page and in the header.
+- **The web server gets no `BACKUP_KEY` and no storage credentials** (only the worker and the release
+  step do), and the code in the image is read-only for the app user.
+- **Backups are bound to their own name** (time, kind, migration count are authenticated data), so a
+  swapped or renamed object fails to decrypt; names dated in the future never push real backups out.
 - **Restore** never swaps a database under a running app: it stages into a new file (decrypt, integrity and
   migrations check), and the swap happens at the next start; the old file is kept; a staged restore expires
   after 6 hours and can be cancelled.

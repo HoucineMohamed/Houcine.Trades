@@ -34,6 +34,8 @@ export function backupState(i: BackupHealthInput): BackupState {
   if (!Number.isFinite(now) || Number.isNaN(ok) || Number.isNaN(bad) || Number.isNaN(since)) {
     return 'unknown';
   }
+  // a success dated in the future (beyond a few minutes of clock difference) cannot be trusted
+  if (ok !== null && ok > now + 5 * 60_000) return 'unknown';
   if (ok === null) {
     if (bad !== null) return 'never';
     if (since !== null && now - since > BACKUP_STALE_MS) return 'never';
@@ -77,6 +79,16 @@ export const BACKUP_ERROR_WORDS: Record<BackupErrorCode, string> = {
   store_denied: 'the backup storage refused the keys',
   not_configured: 'the backup settings are incomplete',
   unexpected: 'an unexpected problem',
+};
+
+/** Why a staged restore was not applied, in words (the file on the disk keeps only a short code). */
+export const RESTORE_FAILURE_WORDS: Record<string, string> = {
+  changed: 'the staged file changed after it was checked',
+  integrity_failed: 'the staged file failed its integrity check',
+  newer_than_app: 'the backup comes from a newer version of the app',
+  swap_failed: 'the files could not be swapped (the previous database was put back)',
+  invalid: 'the staged restore could not be read',
+  expired: 'it waited more than 6 hours and was discarded',
 };
 
 /** Shown in the header: everything except a healthy state and the first hours after setup. */

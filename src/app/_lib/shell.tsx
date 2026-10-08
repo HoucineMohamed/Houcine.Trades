@@ -6,6 +6,7 @@ import { readBackupStatus } from '@/data/backups';
 import { getNotificationSettings, loadHealth } from '@/data/notifications';
 import { loadRiskContext } from '@/data/risk';
 import { BACKUP_HEADER_WORDS, backupIsProblem, backupState } from '@/domain/hosting/backup-health';
+import { readRestoreFailure } from '@/hosting/restore';
 import { alertHealth } from '@/domain/notifications';
 import { getChannelRuntime } from '@/notifications/runtime';
 import { logoutAction } from '../security/actions';
@@ -43,7 +44,9 @@ function backupsIndicator(ctx: GuardContext): string | null {
   if (!isHosted()) return null;
   try {
     const state = backupState({ ...readBackupStatus(ctx.db), now: ctx.now });
-    return backupIsProblem(state) ? BACKUP_HEADER_WORDS[state] : null;
+    if (backupIsProblem(state)) return BACKUP_HEADER_WORDS[state];
+    const dataDir = process.env.DATA_DIR;
+    return dataDir && readRestoreFailure(dataDir) ? 'Restore not applied' : null;
   } catch {
     return BACKUP_HEADER_WORDS.unknown;
   }

@@ -59,6 +59,19 @@ describe('Dockerfile', () => {
     }
     expect(text).not.toMatch(/:latest\b/);
   });
+  it('runs install scripts for better-sqlite3 only, and leaves the code read-only for the app user', () => {
+    expect(text).toContain('npm ci --ignore-scripts && npm rebuild better-sqlite3');
+    const runtime = text.slice(text.indexOf('AS runtime'));
+    for (const line of runtime.split('\n').filter((l) => l.startsWith('COPY'))) {
+      expect(line, line).not.toContain('--chown');
+    }
+    expect(runtime).toContain('chown node:node .next/cache');
+  });
+  it('the supervisor starts as one process (tsx is loaded into node, not a wrapper)', () => {
+    expect(text).toContain('"--import", "tsx"');
+    expect(read('scripts/host/start.ts')).toContain("'--import', 'tsx'");
+    expect(read('scripts/host/start.ts')).not.toContain('tsx/cli');
+  });
   it('installs from the lockfile and ships no dev dependencies', () => {
     expect(text).toContain('RUN npm ci');
     expect(text).toContain('npm prune --omit=dev');
@@ -95,6 +108,13 @@ describe('docker-entrypoint.sh', () => {
   it('only changes the owner of the data folder, without following links', () => {
     expect(text).toContain('chown -R -h node:node "$DATA_DIR"');
     expect(text).not.toMatch(/chmod\s+-?R?\s*777|chmod 777/);
+  });
+  it('refuses to hand a system folder to the app user', () => {
+    for (const path of ['/', '/etc', '/usr', '/app', '/var', '/home']) {
+      expect(text, path).toContain(` ${path} `.replace('/ ', '/ ').trim().length ? path : path);
+    }
+    expect(text).toContain('entrypoint.bad_data_dir');
+    expect(text).toContain('exit 78');
   });
   it('is executable', () => {
     expect(fs.statSync(path.join(ROOT, 'docker-entrypoint.sh')).mode & 0o111).not.toBe(0);

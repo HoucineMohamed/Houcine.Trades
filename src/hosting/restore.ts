@@ -9,7 +9,8 @@ import {
   parseBackupKey as parseKeyName,
   type BackupName,
 } from '@/domain/hosting/retention';
-import { BackupCryptoError, decryptBackup } from './crypto';
+import { backupContext, BackupCryptoError, decryptBackup } from './crypto';
+import { MAX_DATABASE_BYTES } from './backup';
 import { inspectDatabaseFile, type MigrationStatus } from './migrations';
 import { StoreError, type ObjectStore } from './object-store';
 import type { Logger } from './logger';
@@ -109,7 +110,9 @@ export async function stageRestore(deps: RestoreDeps, objectKey: string): Promis
   }
   let plain: Buffer;
   try {
-    plain = gunzipSync(decryptBackup(blob, deps.key));
+    plain = gunzipSync(decryptBackup(blob, deps.key, backupContext(objectKey)), {
+      maxOutputLength: MAX_DATABASE_BYTES,
+    });
   } catch (e) {
     return {
       ok: false,
@@ -149,7 +152,9 @@ export async function stageRestore(deps: RestoreDeps, objectKey: string): Promis
       applied: facts.migrations.applied,
       pending: facts.migrations.pending,
     };
-    fs.writeFileSync(p.marker, JSON.stringify(marker), { mode: 0o600 });
+    // written to a temporary name and renamed: a crash can never leave a half-written marker
+    fs.writeFileSync(`${p.marker}.tmp`, JSON.stringify(marker), { mode: 0o600 });
+    fs.renameSync(`${p.marker}.tmp`, p.marker);
     deps.log?.info('restore.staged', { applied: marker.applied, pending: marker.pending });
     return { ok: true, objectKey, migrations: facts.migrations };
   } catch {
@@ -160,14 +165,53 @@ export async function stageRestore(deps: RestoreDeps, objectKey: string): Promis
 
 /** Throws away a staged restore. True if there was one. */
 export function cancelStagedRestore(dataDir: string): boolean {
-  const had = fs.existsSync(paths(dataDir).marker) || fs.existsSync(paths(dataDir).incoming);
+  const result = path.join(paths(dataDir).dir, 'LAST_RESULT.json');
+  const had =
+    fs.existsSync(paths(dataDir).marker) ||
+    fs.existsSync(paths(dataDir).incoming) ||
+    fs.existsSync(result);
   cleanStage(dataDir);
+  fs.rmSync(result, { force: true }); // the owner has seen it
   return had;
 }
 
 /** True when a restore has been staged and is waiting for the next start. */
 export function restoreIsStaged(dataDir: string): boolean {
   return fs.existsSync(paths(dataDir).marker);
+}
+
+const RESULT = 'LAST_RESULT.json';
+
+/** What the last attempt to apply a staged restore did (so a failure is not only a line in the log). */
+export function recordRestoreResult(
+  dataDir: string,
+  result: { applied: boolean; reason: string },
+  now: Date,
+): void {
+  try {
+    const p = paths(dataDir);
+    fs.mkdirSync(p.dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(
+      path.join(p.dir, RESULT),
+      JSON.stringify({ at: now.toISOString(), applied: result.applied, reason: result.reason }),
+      { mode: 0o600 },
+    );
+  } catch {
+    /* the log line is still written by the caller */
+  }
+}
+
+/** The reason of a staged restore that could NOT be applied (shown on the Backups page), or null. */
+export function readRestoreFailure(dataDir: string): { at: string; reason: string } | null {
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(path.join(paths(dataDir).dir, RESULT), 'utf8'));
+    const r = z
+      .object({ at: z.string(), applied: z.boolean(), reason: z.string().max(60) })
+      .parse(raw);
+    return r.applied ? null : { at: r.at, reason: r.reason };
+  } catch {
+    return null;
+  }
 }
 
 export type ApplyResult =
@@ -208,9 +252,13 @@ async function applyChecked(opts: {
   try {
     marker = markerSchema.parse(JSON.parse(fs.readFileSync(p.marker, 'utf8')));
   } catch {
+    cleanStage(opts.dataDir); // an unreadable marker would otherwise fail at every start
     return { applied: false, reason: 'invalid' };
   }
-  if (!fs.existsSync(p.incoming)) return { applied: false, reason: 'invalid' };
+  if (!fs.existsSync(p.incoming)) {
+    cleanStage(opts.dataDir);
+    return { applied: false, reason: 'invalid' };
+  }
   const stagedAt = Date.parse(marker.stagedAt);
   if (!Number.isFinite(stagedAt) || clock().getTime() - stagedAt > STAGE_MAX_AGE_MS) {
     cleanStage(opts.dataDir); // forgotten: discarded, never applied by surprise
@@ -236,7 +284,8 @@ async function applyChecked(opts: {
   try {
     for (const s of suffixes) {
       if (fs.existsSync(live + s)) {
-        const to = `${live}${s}.before-restore-${stamp}`;
+        // the side files keep the same pairing (name-wal, name-shm), so SQLite can still open the kept file
+        const to = `${live}.before-restore-${stamp}${s}`;
         fs.renameSync(live + s, to);
         moved.push([live + s, to]);
       }

@@ -84,3 +84,51 @@ describe('redactValue', () => {
     expect((redactValue(Array.from({ length: 500 }, (_, i) => i)) as number[]).length).toBe(40);
   });
 });
+
+describe('redaction never lets a seeded secret through', () => {
+  let seed = 4242;
+  const rand = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+  const ALPHA = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const SPECIAL = '.*+?^${}()|[]\\/-_!@#% ';
+  const secretOf = (n: number, special: boolean) => {
+    const chars = (special ? ALPHA + SPECIAL : ALPHA).split('');
+    return Array.from({ length: n }, () => chars[Math.floor(rand() * chars.length)]).join('');
+  };
+  const FILLER = ['', ' ', 'x', 'error: ', '"', "'", '(', ')=', ',', '\n', 'a=b&c=', '/path/'];
+  const forms = (s: string) => [
+    s,
+    encodeURIComponent(s),
+    Buffer.from(s).toString('base64'),
+    Buffer.from(s).toString('base64url'),
+  ];
+  const pick = <T>(a: T[]): T => a[Math.floor(rand() * a.length)] as T;
+
+  it('in text at random positions, in every encoding it claims to handle', () => {
+    for (let i = 0; i < 400; i++) {
+      const secret = secretOf(6 + Math.floor(rand() * 20), rand() < 0.5);
+      const text = `${pick(FILLER)}${pick(FILLER)}${pick(forms(secret))}${pick(FILLER)}${pick(FILLER)}`;
+      const out = redactText(text, [secret]);
+      for (const f of forms(secret)) expect(out, JSON.stringify(text)).not.toContain(f);
+    }
+  });
+  it('inside errors, nested values, arrays and JSON text', () => {
+    for (let i = 0; i < 150; i++) {
+      const secret = secretOf(8 + Math.floor(rand() * 12), false);
+      for (const w of [
+        new Error(`failed with ${secret}`),
+        { a: { b: [`x ${secret} y`] } },
+        [secret, { note: `v=${secret}` }],
+        JSON.stringify({ v: secret }),
+      ]) {
+        expect(JSON.stringify(redactValue(w, [secret]))).not.toContain(secret);
+      }
+    }
+  });
+  it('a secret used as an object KEY does not reach the output', () => {
+    const secret = secretOf(16, false);
+    expect(JSON.stringify(redactValue({ [secret]: 1 }, [secret]))).not.toContain(secret);
+  });
+  it('secrets under 6 characters are ignored by design (documented limit)', () => {
+    expect(redactText('abcde', ['abcde'])).toBe('abcde');
+  });
+});

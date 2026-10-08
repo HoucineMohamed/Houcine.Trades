@@ -5,6 +5,7 @@ import { readHostingConfig } from '@/hosting/config';
 import { createLogger, secretsFromEnv } from '@/hosting/logger';
 import { createS3Store } from '@/hosting/object-store';
 import { startSetupServer } from '@/hosting/setup-server';
+import { webEnvironment } from '@/hosting/child-env';
 import { realStartupIo } from '@/hosting/startup';
 import type { ChildSpec } from '@/hosting/supervisor';
 import { deliverPending } from '@/notifications/delivery';
@@ -22,7 +23,6 @@ async function main(): Promise<number> {
   const log = createLogger({ service: 'supervisor', secrets });
   const cfg = readHostingConfig(env);
   const nextBin = require.resolve('next/dist/bin/next');
-  const tsxCli = require.resolve('tsx/cli');
 
   return runBoot({
     env,
@@ -38,12 +38,14 @@ async function main(): Promise<number> {
         name: 'web',
         command: process.execPath,
         args: [nextBin, 'start', '-H', '0.0.0.0', '-p', String(port)],
-        env: { ...env, NODE_ENV: 'production' },
+        // the web server never gets the backup key or the storage credentials
+        env: webEnvironment({ ...env, NODE_ENV: 'production' }),
       },
       {
         name: 'worker',
         command: process.execPath,
-        args: [tsxCli, '--conditions=react-server', 'scripts/host/worker.ts'],
+        // tsx is loaded INTO node (one process), not as a wrapper: a kill reaches the real worker
+        args: ['--conditions=react-server', '--import', 'tsx', 'scripts/host/worker.ts'],
         env: { ...env, NODE_ENV: 'production' },
       },
     ],

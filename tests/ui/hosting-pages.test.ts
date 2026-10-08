@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { prerender } from 'react-dom/static';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -193,5 +195,26 @@ describe('hosted', () => {
     expect(html).not.toContain('backups/x.htbk');
     expect(html).not.toContain('a'.repeat(64));
     expect(html).not.toMatch(/https?:\/\/(?!app\.example\.test)/);
+  });
+
+  it('a staged restore that could not be applied is shown on the page and in the header, until it is cleared', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'houcine-ui-'));
+    process.env.DATA_DIR = dataDir;
+    try {
+      ok(hoursAgo(1));
+      const { recordRestoreResult, cancelStagedRestore } = await import('@/hosting/restore');
+      expect(await page()).not.toContain('NOT applied');
+      recordRestoreResult(dataDir, { applied: false, reason: 'integrity_failed' }, new Date());
+      const html = await page();
+      expect(html).toContain('A staged restore was NOT applied');
+      expect(html).toContain('the staged file failed its integrity check');
+      expect(html).toContain('Restore not applied');
+      expect(await render('src/app/page.tsx')).toContain('Restore not applied'); // on every page
+      cancelStagedRestore(dataDir);
+      expect(await page()).not.toContain('NOT applied');
+    } finally {
+      delete process.env.DATA_DIR;
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

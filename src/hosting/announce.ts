@@ -2,6 +2,7 @@ import 'server-only';
 import type { Db } from '@/data/client';
 import { getNotificationSettings, insertEvents } from '@/data/notifications';
 import { makeEvent, type EventKind } from '@/domain/notifications';
+import type { Logger } from './logger';
 
 /**
  * Hosting events (backup finished or failed, migration applied or failed, restore applied) enter the
@@ -14,12 +15,20 @@ import { makeEvent, type EventKind } from '@/domain/notifications';
  *
  * Best effort: recording an event can never make a backup, a migration or a restore fail.
  */
-export function announce(db: Db, kind: EventKind, dedupeKey: string, now: Date): boolean {
+export function announce(
+  db: Db,
+  kind: EventKind,
+  dedupeKey: string,
+  now: Date,
+  log?: Logger,
+): boolean {
   try {
     if (!getNotificationSettings(db, now).master) return false;
     insertEvents(db, [makeEvent({ kind, dedupeKey, occurredAt: now.toISOString() })], now);
     return true;
-  } catch {
+  } catch (e) {
+    // never fails the caller, but is never silent either (for example a database from before migration 0006)
+    log?.warn('announce.failed', { kind, error: e instanceof Error ? e.name : 'unknown' });
     return false;
   }
 }

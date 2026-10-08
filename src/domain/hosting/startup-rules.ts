@@ -86,8 +86,14 @@ export function evaluateStartup(f: StartupFacts): StartupResult {
   if (!f.backupKeyValid) bad.add('backup_key');
   if (!f.objectStoreValid) bad.add('object_store');
   if (f.ownerExists === null) bad.add('owner_unreadable');
-  if (f.migrationsPending === null) bad.add('migrations_unreadable');
-  else if (f.migrationsPending > 0) bad.add('migrations_pending');
+  // anything but a whole number zero or more (null, NaN, negative) is unreadable, never "fine"
+  if (
+    f.migrationsPending === null ||
+    !Number.isInteger(f.migrationsPending) ||
+    f.migrationsPending < 0
+  ) {
+    bad.add('migrations_unreadable');
+  } else if (f.migrationsPending > 0) bad.add('migrations_pending');
   const failures = [...bad].map((code) => ({ code, message: STARTUP_MESSAGES[code] }));
   return {
     ok: failures.length === 0,

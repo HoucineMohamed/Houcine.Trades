@@ -158,6 +158,10 @@ Create each as an **environment variable** (use Render's "secret" option where i
 `HOSTED=true`, `NODE_ENV=production` and `PORT` are already set inside the image. `TRADING_MODE`
 defaults to `paper` and the app refuses anything else.
 
+The web server (the part that faces the internet) is started **without** `BACKUP_KEY` and the `S3_...`
+settings: only the worker, which makes the backups, and the shell scripts get them. So a flaw in the web
+server cannot hand over the means to read or delete your off-platform backups.
+
 ### 7.2 Optional
 
 `S3_PREFIX` (folder inside the bucket, default `backups`), `SESSION_IDLE_MINUTES`,
@@ -277,11 +281,24 @@ never replace your database weeks later.)
 
 1. Do Phase 1 for the backup you want.
 2. Render > Manual Deploy > **Restart**. At the start, before anything opens the database, the staged
-   file replaces the live one. The old database is **kept** next to it with `.before-restore-` in its
-   name (it is never deleted for you).
-3. The logs show `boot.restore_applied`. Sign in and check your data.
+   file replaces the live one. The old database is **kept** next to it, in files whose names contain
+   `.before-restore-` (it is never deleted for you; delete those files yourself once you are satisfied,
+   because they hold your whole journal in readable form).
+3. The logs show `boot.restore_applied`. **A restore puts a copy of the past in place, so for your
+   safety the app then ends every session and halts every account** ("Precautionary halt after a
+   restore from a backup"). Sign in again with your password and authenticator code, check your
+   trades and limits (anything done after the backup time is not in the restored file, including a
+   halt that began after it), and only then reset the halts on the Risk page (that needs a fresh
+   code on purpose). If you restored because someone got in, also run `npm run auth:reset`: the
+   restored file brings back the old password and authenticator too.
+   If a staged restore could **not** be applied (the file changed, failed its check, or came from a
+   newer version), the database in use stays as it was, and the Backups page and the header say
+   "Restore not applied" until you run `npm run host:restore -- --cancel`.
 4. If the restored backup is from an older version of the app, the start also takes a new verified
    backup and applies the newer database updates.
+5. **If you see `boot.database_missing_backups_exist` in the log**, the disk has no database but your
+   bucket holds backups (a typo in `DATABASE_URL`, a deleted file, a new empty disk). Do **not** create
+   an owner: run `npm run host:restore` first.
 
 **Prove your password-manager copy of `BACKUP_KEY` works:** the key in Render and the key in your
 password manager must be identical. Open both and compare them character by character once. A backup
@@ -295,7 +312,10 @@ made today can only be opened with that exact key.
 3. On start, the **release step** runs by itself: if there are new database updates it first makes a
    **verified backup** ("pre-migration"), then applies them. If the backup or an update fails, the
    container does **not** start, the old database is untouched, and a notice is attempted (alerts, if
-   on). The log says `release.backup_failed` or `release.migration_failed`.
+   on). The log says `release.backup_failed` or `release.migration_failed`. **The log is always the
+   signal you can rely on:** a release that crosses migration 0006 (or any later one that adds
+   notification kinds) starts from a database that cannot yet record such a notice, so nothing is
+   queued for your phone in that one case.
 4. Check: `/healthz` is `ok`, the Backups page is healthy, the Alerts page shows "A database update was
    applied" (if alerts are on).
 5. **Rollback:** (a) redeploy the previous version on Render; (b) if the data must go back too, run
@@ -345,8 +365,9 @@ without reading them first.
   old database exactly as it was and starts nothing.
 - Backups: consistent snapshot, encryption before upload (the stored file contains no readable text),
   upload, read-back verification; a corrupted object, a truncated upload, an upload the provider
-  silently dropped, a wrong key, and a damaged file are all detected; the plaintext snapshot and its
-  side files never outlive the backup.
+  silently dropped, a wrong key, a damaged file and an object swapped for another backup (the name is
+  authenticated) are all detected; the plaintext snapshot and its side files are removed when the
+  backup ends, and any left by a hard kill are swept at the next start.
 - Retention: a random-input test proves the newest backup and the newest of each kind are never
   deleted; files that are not ours are never touched; a failed listing deletes nothing.
 - Restore: into a new file, integrity and migrations check, swap only at start with the app closed,

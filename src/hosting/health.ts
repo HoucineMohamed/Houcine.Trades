@@ -44,7 +44,9 @@ export function checkHealth(options: HealthOptions = {}): boolean {
       const dataDir = env.DATA_DIR;
       if (!dataDir) return false;
       const modified = fs.statSync(heartbeatPath(dataDir)).mtimeMs;
-      if (!(now.getTime() - modified <= WORKER_STALE_MS)) return false;
+      const age = now.getTime() - modified;
+      // fresh, and not dated in the future either (a future time would stay "fresh" for a long time)
+      if (!(age <= WORKER_STALE_MS && age >= -60_000)) return false;
     }
     return true;
   } catch {

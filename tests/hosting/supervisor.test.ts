@@ -275,3 +275,51 @@ describe('what the children print', () => {
     ]);
   });
 });
+
+describe('processes that fail to start, and output without a final newline', () => {
+  it('a child that fails to start (only an error event, no exit) is handled like a crash and restarted', () => {
+    const t = setup();
+    t.sup.start();
+    t.running('web')[0]?.child.failToStart();
+    expect(t.logs.join('\n')).toContain('child.crashed');
+    expect(t.logs.join('\n')).not.toContain('/secret/path'); // the error text is dropped
+    t.advance(1100);
+    expect(t.running('web')).toHaveLength(2);
+  });
+
+  it('a stop is not blocked by a child that failed to start', async () => {
+    const t = setup();
+    t.sup.start();
+    t.running('web')[0]?.child.failToStart();
+    t.sup.requestStop();
+    t.running('worker')[0]?.child.exit(0, 'SIGTERM');
+    expect(await t.sup.done).toBe(0);
+  });
+
+  it('the last line, printed without a newline just before an exit, is not lost', () => {
+    const t = setup();
+    t.sup.start();
+    const web = t.running('web')[0]?.child;
+    web?.say('Error: the fatal message');
+    web?.exit(1);
+    expect(t.out.map((l) => JSON.parse(l).line)).toContain('Error: the fatal message');
+  });
+
+  it('JSON log lines keep their structure even when long; their values are still redacted', () => {
+    const secret = 'sup3r-s3cret-value-1234';
+    const t = setup({ secrets: [secret] });
+    t.sup.start();
+    const w = t.running('worker')[0]?.child;
+    const long = JSON.stringify({
+      ts: 'x',
+      level: 'info',
+      service: 'worker',
+      event: 'a.b',
+      note: `${secret} ${'word '.repeat(120)}`,
+    });
+    w?.say(`${long}\n`);
+    const parsed = JSON.parse(t.out[0] as string);
+    expect(parsed.event).toBe('a.b');
+    expect(JSON.stringify(parsed)).not.toContain(secret);
+  });
+});

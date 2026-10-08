@@ -217,3 +217,52 @@ describe('retention on the store', () => {
     expect(store.objects.size).toBe(1);
   });
 });
+
+describe('hardening found by the reviews', () => {
+  it('a plaintext snapshot left by a hard kill is swept at the next start (only files of that exact shape)', async () => {
+    const { sweepStaleSnapshots } = await import('@/hosting/backup');
+    const tmp = path.join(dir, 'tmp');
+    fs.mkdirSync(tmp, { recursive: true });
+    const id = '123e4567-e89b-12d3-a456-426614174000';
+    for (const f of [`snapshot-${id}.db`, `snapshot-${id}.db-wal`, `snapshot-${id}.db-shm`])
+      fs.writeFileSync(path.join(tmp, f), 'plain');
+    fs.writeFileSync(path.join(tmp, 'notes.txt'), 'mine');
+    fs.writeFileSync(path.join(tmp, 'snapshot-x.db'), 'not our shape');
+    expect(sweepStaleSnapshots(tmp)).toBe(3);
+    expect(fs.readdirSync(tmp).sort()).toEqual(['notes.txt', 'snapshot-x.db']);
+    expect(sweepStaleSnapshots(path.join(dir, 'no-such-folder'))).toBe(0);
+  });
+
+  it('a temp folder that cannot be created is a recorded failure, never a throw', async () => {
+    fs.writeFileSync(path.join(dir, 'a-file'), 'x');
+    const r = await runBackup(deps({ tmpDir: path.join(dir, 'a-file', 'sub') }), 'daily');
+    expect(r).toMatchObject({ ok: false, code: 'snapshot_failed' });
+    expect(listBackupRuns(db)[0]).toMatchObject({
+      outcome: 'failed',
+      errorCode: 'snapshot_failed',
+    });
+    expect(eventKinds()).toEqual(['backup_failed']);
+  });
+
+  it('an upload whose read-back fails on the network is removed, not left to pass as a backup', async () => {
+    store.failNext.set('get', 'network');
+    const r = await runBackup(deps(), 'daily');
+    expect(r).toMatchObject({ ok: false, code: 'store_unreachable' });
+    expect(store.objects.size).toBe(0);
+  });
+
+  it('the stored file is bound to its own name: another name does not decrypt', async () => {
+    const { decryptBackup, backupContext } = await import('@/hosting/crypto');
+    const r = await runBackup(deps(), 'daily');
+    if (!r.ok) throw new Error('backup failed');
+    const blob = store.objects.get(r.objectKey) as Buffer;
+    expect(() => decryptBackup(blob, key, backupContext(r.objectKey))).not.toThrow();
+    expect(() => decryptBackup(blob, key, '20261008T030001Z-daily-m7.htbk')).toThrow();
+  });
+
+  it('the log carries a short checksum prefix, not the whole hash', async () => {
+    await runBackup(deps(), 'daily');
+    const ok = lines.find((l) => l.includes('backup.ok')) as string;
+    expect(JSON.parse(ok).checksum).toMatch(/^[0-9a-f]{12}$/);
+  });
+});

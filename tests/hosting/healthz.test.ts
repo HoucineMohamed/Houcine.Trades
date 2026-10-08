@@ -87,3 +87,14 @@ describe('GET /healthz', () => {
     expect(Object.keys(mod).sort()).toEqual(['GET', 'dynamic']);
   });
 });
+
+describe('a heartbeat dated in the future is not "fresh"', () => {
+  it('not ok', () => {
+    const env = { HOSTED: 'true', DATA_DIR: dir };
+    const now = new Date();
+    touchHeartbeat(dir, now);
+    const future = new Date(now.getTime() + 3_600_000);
+    fs.utimesSync(heartbeatPath(dir), future, future);
+    expect(checkHealth({ env, now, db: () => memoryDb() })).toBe(false);
+  });
+});

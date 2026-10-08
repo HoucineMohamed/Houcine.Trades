@@ -65,6 +65,8 @@ found="$(docker run ${SMOKE_RUN_ARGS:-} --rm --entrypoint sh "$IMAGE" -c \
 [ -z "$found" ] || fail "private or local files are in the image: $found"
 ok "no .env, database, data folder, git folder or tests in the image (decoys were planted and are absent)"
 
+docker run ${SMOKE_RUN_ARGS:-} --rm --entrypoint sh "$IMAGE" -c 'command -v find >/dev/null' \
+  || fail "the image has no find command, so the scan for private files would pass vacuously"
 docker run ${SMOKE_RUN_ARGS:-} --rm --entrypoint sh "$IMAGE" -c 'test ! -e /app/node_modules/vitest && test ! -e /app/node_modules/eslint && test ! -e /app/node_modules/prettier && test -e /app/node_modules/tsx' \
   || fail "dev dependencies are in the image (or tsx is missing)"
 ok "no dev dependencies in the image"
@@ -136,6 +138,33 @@ ok "web app answers, / redirects to /login, HSTS is sent, /healthz is ok"
 docker logs "$NAME" 2>&1 | grep -q '"child":"worker"' || fail "the worker did not start"
 docker logs "$NAME" 2>&1 | grep -q '"event":"worker.started"' || fail "the worker did not report that it started"
 ok "supervisor started the web server and the worker"
+
+# /healthz must really say "not ok" when the worker shows no sign of life (the heartbeat file is removed)
+docker exec "$NAME" rm -f /var/data/.worker-heartbeat
+[ "$(probe /healthz)" = "503 not ok" ] || fail "/healthz must be 503 'not ok' without a worker heartbeat"
+wait_for 90 "the worker to write its heartbeat again" healthz_ok
+ok "/healthz is 503 'not ok' without a heartbeat and recovers when the worker is alive"
+
+# the code is read-only for the app user, and the web server has no backup key or storage credentials
+docker exec --user node "$NAME" sh -c 'touch /app/src/probe 2>/dev/null' && fail "the app user can write into the code" || true
+env_check="$(docker exec --user node "$NAME" node -e "
+const fs=require('fs');
+for (const d of fs.readdirSync('/proc')) {
+  if (!/^[0-9]+\$/.test(d) || d === String(process.pid)) continue; // never look at this checker itself
+  try {
+    const cmd = fs.readFileSync('/proc/'+d+'/cmdline','utf8');
+    if (cmd.includes('next-server') || (cmd.includes('next') && cmd.includes('start'))) { // Next renames its process
+      let env;
+      try { env = fs.readFileSync('/proc/'+d+'/environ','utf8'); } catch { console.log('UNREADABLE'); process.exit(0); }
+      console.log(/(^|\\0)(BACKUP_KEY|S3_SECRET_ACCESS_KEY)=/.test(env) ? 'LEAK' : 'CLEAN');
+      process.exit(0);
+    }
+  } catch {}
+}
+console.log('NOPROC');
+")"
+[ "$env_check" = "CLEAN" ] || fail "web server environment check: $env_check (expected CLEAN)"
+ok "code is read-only for the app user; the web server has no backup key or storage credentials"
 
 # ---- 6. no secret in the log -------------------------------------------------------------------
 logs="$(docker logs "$NAME" 2>&1)"

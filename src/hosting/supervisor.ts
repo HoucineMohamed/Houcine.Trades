@@ -4,7 +4,8 @@ import {
   decideAfterCrash,
   type CrashPolicy,
 } from '@/domain/hosting/supervisor-policy';
-import { redactText } from '@/domain/hosting/redact';
+import { StringDecoder } from 'node:string_decoder';
+import { redactText, redactValue } from '@/domain/hosting/redact';
 import type { Logger } from './logger';
 
 /**
@@ -32,6 +33,7 @@ export interface ChildSpec {
 }
 
 export interface ChildProcessLike {
+  pid?: number;
   kill(signal: NodeJS.Signals): boolean;
   on(event: 'exit', cb: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
   on(event: 'error', cb: (error: Error) => void): unknown;
@@ -73,6 +75,8 @@ interface Child {
   restartTimer: unknown;
   /** Already killed for a silent heartbeat; waiting for its exit. */
   killedForSilence: boolean;
+  /** Writes out whatever the child printed without a final newline. */
+  flushers: (() => void)[];
 }
 
 export class Supervisor {
@@ -94,6 +98,7 @@ export class Supervisor {
       startedAt: 0,
       restartTimer: null,
       killedForSilence: false,
+      flushers: [],
     }));
     this.done = new Promise((resolve) => {
       this.resolveDone = resolve;
@@ -123,6 +128,7 @@ export class Supervisor {
   private launch(c: Child): void {
     c.restartTimer = null;
     c.killedForSilence = false;
+    c.flushers = [];
     let proc: ChildProcessLike;
     try {
       proc = this.o.spawn(c.spec);
@@ -136,10 +142,18 @@ export class Supervisor {
     c.startedAt = this.o.now();
     this.pipe(c, proc.stdout, 'info');
     this.pipe(c, proc.stderr, 'warn');
-    proc.on('error', () => undefined); // an 'exit' event follows; the message could hold a path
+    // The message of an 'error' could hold a path, so it is dropped. A process that could not even be
+    // started (no pid) gets an 'error' and NEVER an 'exit': it is handled like a crash.
+    proc.on('error', () => {
+      if (c.proc !== proc || proc.pid !== undefined) return;
+      c.proc = null;
+      for (const flush of c.flushers) flush();
+      this.onExit(c, null, null);
+    });
     proc.on('exit', (code, signal) => {
       if (c.proc !== proc) return;
       c.proc = null;
+      for (const flush of c.flushers) flush(); // the last line, often the fatal message, has no newline
       this.onExit(c, code, signal);
     });
     this.o.log.info('child.started', { child: c.spec.name });
@@ -147,9 +161,10 @@ export class Supervisor {
 
   private pipe(c: Child, stream: ChildProcessLike['stdout'], level: 'info' | 'warn'): void {
     if (!stream) return;
+    const decoder = new StringDecoder('utf8'); // a multi-byte character split across chunks stays whole
     let buffer = '';
     stream.on('data', (chunk) => {
-      buffer += chunk.toString();
+      buffer += typeof chunk === 'string' ? chunk : decoder.write(chunk);
       let i: number;
       while ((i = buffer.indexOf('\n')) >= 0) {
         this.emit(c.spec.name, level, buffer.slice(0, i));
@@ -160,20 +175,25 @@ export class Supervisor {
         buffer = '';
       }
     });
+    c.flushers.push(() => {
+      buffer += decoder.end();
+      if (buffer !== '') this.emit(c.spec.name, level, buffer);
+      buffer = '';
+    });
   }
 
   private emit(child: string, level: string, raw: string): void {
-    const line = redactText(raw.trim(), this.o.secrets ?? []);
-    if (line === '') return;
-    // our own log lines are already JSON: pass them on; anything else is wrapped
+    const text = raw.trim();
+    if (text === '') return;
+    // our own log lines are JSON: they stay JSON (every value redacted); anything else is wrapped
     try {
-      const parsed: unknown = JSON.parse(line);
+      const parsed: unknown = JSON.parse(text);
       if (
         parsed &&
         typeof parsed === 'object' &&
         typeof (parsed as { event?: unknown }).event === 'string'
       ) {
-        this.o.write(line);
+        this.o.write(JSON.stringify(redactValue(parsed, this.o.secrets ?? [])));
         return;
       }
     } catch {
@@ -185,7 +205,7 @@ export class Supervisor {
         level,
         service: child,
         event: 'output',
-        line,
+        line: redactText(text, this.o.secrets ?? []),
       }),
     );
   }

@@ -129,3 +129,58 @@ describe('daily backup job', () => {
     expect(await job().tick()).toBe('error');
   });
 });
+
+describe('hardening found by the reviews', () => {
+  it('if the attempt cannot be written to the database, the 30 minute spacing still holds (no retry storm)', async () => {
+    const j = job();
+    // the table is gone: the attempt cannot be recorded
+    db.$client.exec(
+      'DROP TRIGGER backup_runs_no_delete; DROP TRIGGER backup_runs_no_update; DROP TABLE backup_runs;',
+    );
+    expect(await j.tick()).toBe('error'); // the status itself is unreadable now: reported, not silent
+  });
+
+  it('with the row unwritable but the status readable, a failed attempt is not repeated every cycle', async () => {
+    // make only the INSERT fail: a trigger that refuses new rows
+    db.$client.exec(
+      "CREATE TRIGGER refuse_runs BEFORE INSERT ON backup_runs BEGIN SELECT RAISE(ABORT, 'nope'); END;",
+    );
+    const j = job();
+    store.denyAll = true;
+    expect(await j.tick()).toBe('ran');
+    const calls = store.calls.length;
+    now = new Date(now.getTime() + 30_000);
+    expect(await j.tick()).toBe('skipped'); // remembered in memory
+    expect(store.calls.length).toBe(calls);
+    now = new Date(now.getTime() + 31 * 60_000);
+    expect(await j.tick()).toBe('ran'); // and retried after 30 minutes
+  });
+
+  it('the "no backup for a day and a half" notice is not hidden by a backup that is still running', async () => {
+    addOwnerAt('2026-10-01T00:00:00.000Z');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const slow = new FakeObjectStore();
+    const origPut = slow.put.bind(slow);
+    slow.put = async (k, b) => {
+      await gate;
+      return origPut(k, b);
+    };
+    store = slow;
+    const j = job();
+    const first = j.tick(); // starts the slow backup
+    await new Promise((r) => setTimeout(r, 30));
+    const second = await j.tick();
+    expect(second).toBe('busy');
+    expect(kinds()).toContain('backup_stale'); // announced although the second tick found a backup running
+    release();
+    await first;
+  });
+});
+function addOwnerAt(createdAt: string) {
+  db.$client
+    .prepare(
+      "INSERT INTO owner (id, password_hash, totp_secret_enc, created_at, updated_at, password_changed_at) VALUES (1, 'h', 'e', ?, ?, ?)",
+    )
+    .run(createdAt, createdAt, createdAt);
+}

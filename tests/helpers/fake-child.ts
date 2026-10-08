@@ -3,6 +3,9 @@ import type { ChildProcessLike } from '@/hosting/supervisor';
 /** A pretend child process: records signals, lets a test make it exit or print. */
 export class FakeChild implements ChildProcessLike {
   signals: string[] = [];
+  /** A started process has a pid; a process that failed to start has none. */
+  pid: number | undefined = 4242;
+  private errorCb: ((e: Error) => void) | null = null;
   private exitCb: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
   private stdoutCb: ((c: string) => void) | null = null;
   private stderrCb: ((c: string) => void) | null = null;
@@ -22,7 +25,13 @@ export class FakeChild implements ChildProcessLike {
   }
   on(event: string, cb: never) {
     if (event === 'exit') this.exitCb = cb;
+    if (event === 'error') this.errorCb = cb;
     return this;
+  }
+  /** The process could not be started: Node emits only 'error', never 'exit'. */
+  failToStart() {
+    this.pid = undefined;
+    this.errorCb?.(new Error('spawn ENOENT /secret/path'));
   }
   exit(code: number | null = 1, signal: NodeJS.Signals | null = null) {
     this.exitCb?.(code, signal);

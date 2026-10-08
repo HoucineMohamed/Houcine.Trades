@@ -3,11 +3,19 @@ import fs from 'node:fs';
 import { createDatabase } from '@/data/client';
 import { readHostingConfig } from './config';
 import { announce } from './announce';
+import { sweepStaleSnapshots } from './backup';
 import { heartbeatPath, touchHeartbeat, WORKER_STALE_MS } from './health';
 import type { Logger } from './logger';
 import type { ObjectStore } from './object-store';
+import { afterRestore } from './restore-aftercare';
 import { runRelease } from './release';
-import { applyStagedRestore, restoreIsStaged, type ApplyResult } from './restore';
+import {
+  applyStagedRestore,
+  listBackups,
+  recordRestoreResult,
+  restoreIsStaged,
+  type ApplyResult,
+} from './restore';
 import type { SetupServer } from './setup-server';
 import { checkStartup, type StartupIo } from './startup';
 import { Supervisor, type ChildSpec, type SupervisorOptions } from './supervisor';
@@ -54,11 +62,12 @@ export async function runBoot(d: BootDeps): Promise<number> {
   const cfg = readHostingConfig(d.env);
   if (!cfg.hosted) {
     d.log.error('boot.not_hosted', { hint: 'HOSTED must be "true" in the platform environment' });
+    await d.sleep(REFUSE_PAUSE_MS); // a pause, so the platform does not restart us in a tight loop
     return EXIT_REFUSED;
   }
   const refuse = async (failures: { code: string; message: string }[]): Promise<number> => {
     for (const f of failures) d.log.error('boot.refused', { code: f.code, message: f.message });
-    await d.sleep(REFUSE_PAUSE_MS);
+    await d.sleep(REFUSE_PAUSE_MS); // (before the stop handler exists, or a deliberate pause: kept as is)
     return EXIT_REFUSED;
   };
 
@@ -74,11 +83,27 @@ export async function runBoot(d: BootDeps): Promise<number> {
   let stopping = false;
   let supervisor: Supervisor | null = null;
   let setup: SetupServer | null = null;
+  let wake: (() => void) | null = null;
   d.onStopSignal(() => {
     stopping = true;
     supervisor?.requestStop();
     void setup?.close();
+    wake?.(); // a stop request ends a pause at once
   });
+  /** A pause that a stop request cuts short (SIGTERM must not wait out a 30 second pause). */
+  const pause = (ms: number): Promise<void> =>
+    stopping
+      ? Promise.resolve()
+      : Promise.race([
+          d.sleep(ms),
+          new Promise<void>((resolve) => {
+            wake = resolve;
+          }),
+        ]);
+
+  // a plaintext snapshot can only be left behind by a hard kill; nothing is running yet, so none is in use
+  const swept = sweepStaleSnapshots(tmpDir);
+  if (swept > 0) d.log.warn('boot.swept_snapshots', { removed: swept });
 
   let restored: ApplyResult | null = null;
   if (restoreIsStaged(dataDir)) {
@@ -90,6 +115,29 @@ export async function runBoot(d: BootDeps): Promise<number> {
     });
     if (restored.applied) d.log.info('boot.restore_applied', {});
     else d.log.error('boot.restore_not_applied', { reason: restored.reason });
+    // kept on the disk, so the Backups page and the header can say it (not only a line in the log)
+    recordRestoreResult(
+      dataDir,
+      { applied: restored.applied, reason: restored.applied ? 'applied' : restored.reason },
+      d.clock(),
+    );
+  }
+
+  // A missing database next to existing backups is NOT a normal new install (a typo in DATABASE_URL, a
+  // deleted file, an empty disk). It is still allowed to continue (setup mode must stay reachable so the
+  // shell can restore), but it is said loudly, before any owner is created on an empty database.
+  if (!fs.existsSync(cfg.databaseFile)) {
+    try {
+      const existing = await listBackups(d.store, storeCfg.prefix);
+      if (existing.length > 0) {
+        d.log.error('boot.database_missing_backups_exist', {
+          backups: existing.length,
+          hint: 'There is no database but backups exist. Restore with: npm run host:restore, then restart. Do NOT create an owner on this empty database.',
+        });
+      }
+    } catch (e) {
+      d.log.warn('boot.backup_list_failed', { error: e instanceof Error ? e.name : 'unknown' });
+    }
   }
 
   const release = await runRelease({
@@ -104,13 +152,18 @@ export async function runBoot(d: BootDeps): Promise<number> {
   });
   if (!release.ok) {
     d.log.error('boot.release_failed', { code: release.code });
-    await d.sleep(REFUSE_PAUSE_MS);
+    await pause(REFUSE_PAUSE_MS);
     return 1;
   }
   if (restored?.applied) {
+    // the restored file is a copy of the past: end every session and halt every account until the owner looks
     const db = createDatabase(cfg.databaseFile);
-    announce(db, 'restore_applied', `restore_applied:${compactUtc(d.clock())}`, d.clock());
-    db.$client.close();
+    try {
+      afterRestore(db, d.clock(), d.log);
+      announce(db, 'restore_applied', `restore_applied:${compactUtc(d.clock())}`, d.clock(), d.log);
+    } finally {
+      db.$client.close();
+    }
   }
 
   const post = checkStartup(d.env, d.io, 'after_release');
@@ -120,9 +173,14 @@ export async function runBoot(d: BootDeps): Promise<number> {
     d.log.warn('boot.setup_mode', {
       hint: 'No owner yet. Open the shell and run: npm run auth:create-owner',
     });
-    setup = await d.startSetupServer({ port: cfg.port, host: '0.0.0.0' });
+    try {
+      setup = await d.startSetupServer({ port: cfg.port, host: '0.0.0.0' });
+    } catch (e) {
+      d.log.error('boot.setup_server_failed', { error: e instanceof Error ? e.name : 'unknown' });
+      return refuse([{ code: 'setup_server', message: 'the health check server could not start' }]);
+    }
     while (!stopping && d.io.databaseState(cfg.databaseFile).ownerExists !== true) {
-      await d.sleep(OWNER_POLL_MS);
+      await pause(OWNER_POLL_MS);
     }
     await setup.close();
     setup = null;

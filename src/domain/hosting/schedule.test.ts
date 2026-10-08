@@ -36,3 +36,19 @@ describe('backupDue', () => {
     expect(backupDue({ lastSuccessAt: null, lastAttemptAt: null, now: new Date('x') })).toBe(false);
   });
 });
+
+describe('timestamps in the future never stop backups', () => {
+  const future = '2030-01-01T00:00:00.000Z';
+  it('a future success or attempt counts as "never happened"', () => {
+    expect(backupDue({ lastSuccessAt: future, lastAttemptAt: null, now: NOW })).toBe(true);
+    expect(backupDue({ lastSuccessAt: null, lastAttemptAt: future, now: NOW })).toBe(true);
+  });
+  it('a fresh success with a very recent failure is not due; a stale attempt with a fresh success is not due', () => {
+    expect(backupDue({ lastSuccessAt: ago(3_600_000), lastAttemptAt: ago(60_000), now: NOW })).toBe(
+      false,
+    );
+    expect(
+      backupDue({ lastSuccessAt: ago(3_600_000), lastAttemptAt: ago(2 * 3_600_000), now: NOW }),
+    ).toBe(false);
+  });
+});
